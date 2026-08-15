@@ -1,0 +1,21 @@
+# ---- Node / Electron ----
+node_modules/
+*.log
+
+# ---- Echo 运行产物（不入库）----
+echo-demo-report-*.json
+artifacts/
+out.md
+trajectory.md
+thinking-sample.md
+measure-*
+.dsh-boot-measure*/
+dev-boot*.log
+
+# ---- 个人调研文档（如需公开请手动 git add -f）----
+DeepSeek-Harness调研报告_v1.md
+DeepSeek-Harness调研报告_GPT输入版.md
+
+# ---- 系统/编辑器 ----
+.DS_Store
+Thumbs.db

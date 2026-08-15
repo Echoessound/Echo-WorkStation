@@ -1,0 +1,14 @@
+{
+  "name": "echo-workstation",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Echo Workstation M0 骨架：Electron 壳 + DeepSeek Harness 引擎（独立 Node 子进程），通过 /api + WebSocket 对接",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron . --disable-gpu --no-sandbox",
+    "start:no-sandbox": "electron . --disable-gpu --no-sandbox"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}
