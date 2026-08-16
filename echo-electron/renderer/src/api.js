@@ -70,4 +70,8 @@ export const product = {
   createAgent: (body) => prod('agents', { method: 'POST', body }),
   updateAgent: (id, body) => prod(`agents/${id}`, { method: 'PUT', body }),
   deleteAgent: (id) => prod(`agents/${id}`, { method: 'DELETE' }),
+
+  listRuns: (agentId) => prod(`runs${agentId ? `?agentId=${encodeURIComponent(agentId)}` : ''}`),
+  createRun: (body) => prod('runs', { method: 'POST', body }),
+  updateRun: (id, body) => prod(`runs/${id}`, { method: 'PUT', body }),
 }

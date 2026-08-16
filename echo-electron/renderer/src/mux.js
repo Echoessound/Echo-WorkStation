@@ -68,6 +68,8 @@ export function foldEvent(state, event) {
     case 'turn/start': {
       next.messages.push({ id: next.messages.length, kind: 'system', text: `── 回合 ${d.turn ?? ''} 开始 ──` })
       next.turn = d.turn
+      // 回合起点：本回合内流式正文的查找/去重以此为界（避免跨回合误判）
+      next.turnStart = next.messages.length - 1
       break
     }
     case 'user/message': {
@@ -92,9 +94,16 @@ export function foldEvent(state, event) {
         }
         next.blocks = { ...next.blocks, [c.index]: undefined }
       } else if (c.type === 'text-delta' || c.type === 'reasoning-delta') {
+        // 从本回合末尾向前找目标消息：delta 事件可能与 tool 消息交错，
+        // 只盯着"最后一条"会丢文本（或误附到历史消息上）
         const target = c.type === 'reasoning-delta' ? 'cot' : 'assistant'
-        const last = next.messages[next.messages.length - 1]
-        if (last?.kind === target) last.text += c.text ?? ''
+        const from = next.turnStart ?? 0
+        for (let i = next.messages.length - 1; i > from; i -= 1) {
+          if (next.messages[i].kind === target) {
+            next.messages[i].text += c.text ?? ''
+            break
+          }
+        }
       }
       break
     }
@@ -128,9 +137,16 @@ export function foldEvent(state, event) {
       break
     }
     case 'assistant/message': {
-      const msg = d.message ?? {}
-      const text = extractMessageText(msg)
-      next.messages.push({ id: next.messages.length, kind: 'assistant', text: text || '(无文本)' })
+      // 正文已由 assistant/chunk 流渲染；这里只在当前回合没有流式正文时兜底，
+      // 否则同一条回复会显示两遍（chunk 一遍 + message 一遍）。
+      const text = extractMessageText(d.message ?? {})
+      const from = next.turnStart ?? 0
+      const streamed = next.messages.slice(from + 1).some(
+        (m) => m.kind === 'assistant' && m.text.trim() !== '',
+      )
+      if (!streamed && text) {
+        next.messages.push({ id: next.messages.length, kind: 'assistant', text })
+      }
       break
     }
     case 'turn/end': {

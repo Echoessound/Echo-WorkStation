@@ -178,9 +178,10 @@ async function main() {
     const agentUpdated = await prod(base, `agents/${agent.id}`, { method: 'PUT', body: { name: '测试评审员V2' } })
     check('更新 agent 名称', agentUpdated.name === '测试评审员V2')
 
-    // ── 4. 试跑闭环（preset 挂载 → prompt → mux 事件）─────────
-    console.log('\n[4] 试跑闭环')
+    // ── 4. runs 记录 + 试跑闭环（preset 挂载 → prompt → mux 事件 → 历史可读）──
+    console.log('\n[4] runs 记录 + 试跑闭环')
     let sessionId = null
+    let runId = null
     try {
       const created = await rpc(base, 'session.create', { cwd: TEST_ROOT, agentPreset: agent.presetId })
       sessionId = created.sessionId
@@ -190,6 +191,16 @@ async function main() {
     }
 
     if (sessionId) {
+      // runs 表记录 agent→session 映射（Chat 面板恢复历史依赖此记录）
+      const run = await prod(base, 'runs', {
+        method: 'POST',
+        body: { kind: 'chat', agentId: agent.id, workspaceId: ws.id, sessionId, input: { text: '测试' } },
+      })
+      runId = run.id
+      check('创建 run 记录成功', !!runId && run.status === 'running', runId)
+      const runList = await prod(base, `runs?agentId=${agent.id}`)
+      check('按 agent 查询 run 列表', runList.items.some(r => r.id === runId), `共 ${runList.items.length} 条`)
+
       if (NO_LLM) {
         console.log('  （--no-llm 跳过真实试跑）')
       } else {
@@ -210,6 +221,13 @@ async function main() {
             const text = JSON.stringify(finalMsg.data?.message ?? finalMsg.data ?? '')
             check('最终回复非空', text.length > 4, text.slice(0, 120))
           }
+          // 历史可读（Chat 面板"对话历史保存"的数据基础）
+          const hist = await rpc(base, 'session.history', { sessionId })
+          const histTypes = (hist.events ?? []).map(e => e.event?.type).filter(Boolean)
+          check('session.history 可读且含本回合事件', histTypes.includes('user/message') && histTypes.includes('turn/end'), `共 ${histTypes.length} 个事件`)
+          // 状态流转：turn/end 后更新 run 为 success
+          const runDone = await prod(base, `runs/${runId}`, { method: 'PUT', body: { status: 'success', finishedAt: Date.now() } })
+          check('run 状态更新为 success', runDone.status === 'success' && !!runDone.finishedAt)
         } catch (err) {
           check(`试跑事件流（失败：${err.message}）`, false)
         }
@@ -218,6 +236,11 @@ async function main() {
 
     // ── 5. 清理 ───────────────────────────────────────────────
     console.log('\n[5] 清理')
+    if (runId) {
+      await prod(base, `runs/${runId}`, { method: 'DELETE' })
+      const runsAfter = await prod(base, `runs?agentId=${agent.id}`)
+      check('删除 run 后列表为空', runsAfter.items.length === 0)
+    }
     await prod(base, `agents/${agent.id}`, { method: 'DELETE' })
     check('删除 agent 后 preset 目录已移除', !fs.existsSync(presetDir))
     await prod(base, `workspaces/${ws.id}`, { method: 'DELETE' })

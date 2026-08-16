@@ -123,6 +123,23 @@ function agentRow(row) {
   }
 }
 
+function runRow(row) {
+  if (!row) return undefined
+  return {
+    id: row.id,
+    kind: row.kind,
+    agentId: row.agent_id ?? null,
+    workspaceId: row.workspace_id ?? null,
+    sessionId: row.session_id ?? null,
+    status: row.status,
+    startedAt: row.started_at ?? null,
+    finishedAt: row.finished_at ?? null,
+    input: safeJson(row.input_json, null),
+    error: row.error ?? null,
+    createdAt: row.created_at,
+  }
+}
+
 function safeJson(text, fallback) {
   try {
     const v = JSON.parse(text)
@@ -273,4 +290,54 @@ function createAgentService(db) {
   }
 }
 
-module.exports = { createWorkspaceService, createAgentService, resolveDshHome, userPresetRoot, TOOLSETS }
+// ── RunService（agent → harness 会话映射，支撑 Chat 历史恢复）──────────────
+
+function createRunService(db) {
+  return {
+    /** 列出 run（可选按 agentId 过滤），created_at 倒序 */
+    async list({ agentId } = {}) {
+      const rows = agentId
+        ? db.all('SELECT * FROM runs WHERE agent_id = ? ORDER BY created_at DESC', [agentId])
+        : db.all('SELECT * FROM runs ORDER BY created_at DESC')
+      return rows.map(runRow)
+    },
+
+    async get(id) {
+      return runRow(db.get('SELECT * FROM runs WHERE id = ?', [id]))
+    },
+
+    /** 新建 run（status=running，记录 agent→session 映射与工作区） */
+    async create({ kind = 'chat', agentId, workspaceId, sessionId, input } = {}) {
+      const now = Date.now()
+      const id = newId()
+      db.run(
+        `INSERT INTO runs (id, kind, agent_id, workspace_id, session_id, status, started_at, input_json, created_at)
+         VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?)`,
+        [id, kind, agentId ?? null, workspaceId ?? null, sessionId ?? null, now,
+          input !== undefined ? JSON.stringify(input) : null, now],
+      )
+      return this.get(id)
+    },
+
+    /** 更新 run 状态（running → success / failed / cancelled） */
+    async update(id, { status, finishedAt, error, sessionId } = {}) {
+      const existing = db.get('SELECT * FROM runs WHERE id = ?', [id])
+      if (!existing) throw new Error('run 不存在')
+      db.run(
+        `UPDATE runs SET status = ?, finished_at = ?, error = ?, session_id = ? WHERE id = ?`,
+        [status ?? existing.status, finishedAt ?? existing.finished_at,
+          error ?? existing.error, sessionId ?? existing.session_id, id],
+      )
+      return this.get(id)
+    },
+
+    async remove(id) {
+      db.run('DELETE FROM runs WHERE id = ?', [id])
+    },
+  }
+}
+
+module.exports = {
+  createWorkspaceService, createAgentService, createRunService,
+  resolveDshHome, userPresetRoot, TOOLSETS,
+}

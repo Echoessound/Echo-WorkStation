@@ -9,7 +9,7 @@
  *  - 失败：{ ok: false, error: { message } }，HTTP 200 或 4xx
  *  - 资源路径：/prod/workspaces[/:id]、/prod/agents[/:id]
  */
-const { createWorkspaceService, createAgentService, resolveDshHome, userPresetRoot } = require('./services.js')
+const { createWorkspaceService, createAgentService, createRunService, resolveDshHome, userPresetRoot } = require('./services.js')
 
 function sendJson(res, status, body) {
   const payload = JSON.stringify(body)
@@ -54,6 +54,7 @@ function readBody(req) {
 function createProductRouter({ db }) {
   const workspaces = createWorkspaceService(db)
   const agents = createAgentService(db)
+  const runs = createRunService(db)
 
   return async function handle(req, res) {
     if (req.method !== 'GET' && req.method !== 'POST' && req.method !== 'PUT' && req.method !== 'DELETE') {
@@ -114,6 +115,29 @@ function createProductRouter({ db }) {
           }
           if (req.method === 'DELETE') {
             await agents.remove(id)
+            return ok(res, { removed: id }), true
+          }
+        }
+      }
+
+      // ── runs（agent → harness 会话映射，支撑 Chat 历史恢复）────
+      if (resource === 'runs') {
+        if (req.method === 'GET' && !id) {
+          const agentId = url.searchParams.get('agentId') ?? undefined
+          return ok(res, { items: await runs.list(agentId ? { agentId } : {}) }), true
+        }
+        if (req.method === 'POST' && !id) {
+          const body = await readBody(req)
+          return ok(res, await runs.create(body)), true
+        }
+        if (id) {
+          if (req.method === 'GET') return ok(res, await runs.get(id)), true
+          if (req.method === 'PUT') {
+            const body = await readBody(req)
+            return ok(res, await runs.update(id, body)), true
+          }
+          if (req.method === 'DELETE') {
+            await runs.remove(id)
             return ok(res, { removed: id }), true
           }
         }

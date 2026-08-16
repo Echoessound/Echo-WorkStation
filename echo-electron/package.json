@@ -11,7 +11,8 @@
     "start:no-sandbox": "electron . --disable-gpu --no-sandbox",
     "test:proxy": "node test-proxy.js",
     "test:m1": "node test-m1.js",
-    "test:m1:no-llm": "node test-m1.js --no-llm"
+    "test:m1:no-llm": "node test-m1.js --no-llm",
+    "test:fold": "node test-fold.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.7.0",
