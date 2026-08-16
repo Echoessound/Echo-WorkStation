@@ -4,6 +4,14 @@ import { subscribeMux, foldEvent } from '../mux.js'
 
 const EMPTY_FEED = { messages: [], blocks: {}, turn: null, turnStart: 0, turnEnded: false }
 
+const RUN_STATUS = {
+  pending: '待开始',
+  running: '进行中',
+  success: '完成',
+  failed: '失败',
+  cancelled: '已停止',
+}
+
 export default function Chat({ agents, workspaces, toolsets }) {
   const [agentId, setAgentId] = useState(null)
   const [prompt, setPrompt] = useState('')
@@ -11,11 +19,14 @@ export default function Chat({ agents, workspaces, toolsets }) {
   const [running, setRunning] = useState(false)
   const [muxStatus, setMuxStatus] = useState('')
   const [sessionId, setSessionId] = useState(null)
+  const [runs, setRuns] = useState([])            // 该 agent 的历史会话（倒序）
+  const [activeRunId, setActiveRunId] = useState(null) // 当前展示/进行中的 run
   const [err, setErr] = useState('')
   const [loadingHistory, setLoadingHistory] = useState(false)
 
   const subRef = useRef(null)
   const runIdRef = useRef(null) // 当前 run 的 id（事件回调闭包用）
+  const loadSeqRef = useRef(0)  // 历史加载竞态序号（快速切换时丢弃过期响应）
   const logRef = useRef(null)
 
   const agent = agents.find((a) => a.id === agentId) ?? null
@@ -24,13 +35,45 @@ export default function Chat({ agents, workspaces, toolsets }) {
   // 卸载时清理 mux
   useEffect(() => () => { subRef.current?.close() }, [])
 
-  // 切换 agent：恢复该 agent 最近一次会话的历史
+  /** 加载某个 run（历史会话）的内容到消息区 */
+  async function loadRun(run) {
+    const seq = ++loadSeqRef.current
+    subRef.current?.close()
+    subRef.current = null
+    setRunning(false)
+    setMuxStatus('')
+    setErr('')
+    setActiveRunId(run.id)
+    runIdRef.current = run.id
+    setSessionId(run.sessionId)
+    setLoadingHistory(true)
+    try {
+      const hist = await sessions.history(run.sessionId)
+      if (loadSeqRef.current !== seq) return // 已被更新的加载取代
+      const events = (hist.events ?? []).map((e) => e.event).filter(Boolean)
+      let s = { ...EMPTY_FEED }
+      for (const ev of events) s = foldEvent(s, ev)
+      setFeed(s)
+    } catch (e) {
+      if (loadSeqRef.current !== seq) return
+      setErr(`会话历史不可读（${e.message}），将从新对话开始。`)
+      setSessionId(null)
+      runIdRef.current = null
+      setActiveRunId(null)
+    } finally {
+      if (loadSeqRef.current === seq) setLoadingHistory(false)
+    }
+  }
+
+  // 切换 agent：拉历史会话列表 + 自动加载最近一次对话
   useEffect(() => {
     subRef.current?.close()
     subRef.current = null
     runIdRef.current = null
     setFeed(EMPTY_FEED)
     setSessionId(null)
+    setRuns([])
+    setActiveRunId(null)
     setRunning(false)
     setMuxStatus('')
     setErr('')
@@ -41,28 +84,18 @@ export default function Chat({ agents, workspaces, toolsets }) {
       setLoadingHistory(true)
       try {
         const { items } = await product.listRuns(agentId)
-        const latest = (items ?? []).find((r) => r.kind === 'chat' && r.sessionId)
-        if (!latest) return
-        // 历史在 harness 会话日志里；这里拉取并按相同的事件折叠规则渲染
-        const hist = await sessions.history(latest.sessionId)
-        const events = (hist.events ?? []).map((e) => e.event).filter(Boolean)
         if (!alive) return
-        let s = { ...EMPTY_FEED }
-        for (const ev of events) s = foldEvent(s, ev)
-        setFeed(s)
-        setSessionId(latest.sessionId)
-        runIdRef.current = latest.id
+        const chats = (items ?? []).filter((r) => r.kind === 'chat' && r.sessionId)
+        setRuns(chats)
+        if (chats.length > 0) await loadRun(chats[0]) // 最新会话
       } catch (e) {
-        // 会话日志不可读（如 harness 数据被清理）→ 当作新对话开始
-        if (alive) {
-          setErr(`未恢复历史（${e.message}），将从新对话开始。`)
-        }
+        if (alive) setErr(`加载会话列表失败：${e.message}`)
       } finally {
         if (alive) setLoadingHistory(false)
       }
     })()
     return () => { alive = false }
-  }, [agentId])
+  }, [agentId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
@@ -107,6 +140,8 @@ export default function Chat({ agents, workspaces, toolsets }) {
         })
         runId = run.id
         runIdRef.current = run.id
+        setActiveRunId(run.id)
+        setRuns((prev) => [run, ...prev]) // 新会话插入历史列表顶部
       }
 
       // 订阅实时事件流（turn/end 后自动收尾并落库状态）
@@ -122,6 +157,7 @@ export default function Chat({ agents, workspaces, toolsets }) {
             setMuxStatus('ended')
             if (runId) {
               void product.updateRun(runId, { status: 'success', finishedAt: Date.now() }).catch(() => {})
+              setRuns((prev) => prev.map((r) => (r.id === runId ? { ...r, status: 'success' } : r)))
             }
           }
         },
@@ -151,16 +187,19 @@ export default function Chat({ agents, workspaces, toolsets }) {
     pushSystem('已请求停止')
     if (runIdRef.current) {
       void product.updateRun(runIdRef.current, { status: 'cancelled', finishedAt: Date.now() }).catch(() => {})
+      const rid = runIdRef.current
+      setRuns((prev) => prev.map((r) => (r.id === rid ? { ...r, status: 'cancelled' } : r)))
     }
   }
 
-  /** 开新对话：清掉当前会话引用，下次发送自动 session.create */
+  /** 开新对话：清掉当前会话引用，下次发送自动 session.create（历史列表保留） */
   function newSession() {
     if (running) return
     subRef.current?.close()
     subRef.current = null
     runIdRef.current = null
     setSessionId(null)
+    setActiveRunId(null)
     setFeed(EMPTY_FEED)
     setErr('')
   }
@@ -172,10 +211,16 @@ export default function Chat({ agents, workspaces, toolsets }) {
     }))
   }
 
+  /** 历史会话列表项的第一条输入摘要 */
+  function runSummary(run) {
+    const text = run.input?.text ?? ''
+    return text ? text.slice(0, 28) : '(空对话)'
+  }
+
   return (
     <>
       <div className="side">
-        <div className="page-sub" style={{ margin: '0 0 10px' }}>选择要试跑的 agent</div>
+        <div className="page-sub" style={{ margin: '0 0 10px' }}>选择 agent</div>
         <div className="list">
           {agents.length === 0 && <div className="empty">还没有 agent，请先到 Agents 页创建。</div>}
           {agents.map((a) => {
@@ -192,6 +237,28 @@ export default function Chat({ agents, workspaces, toolsets }) {
             )
           })}
         </div>
+
+        {agent && (
+          <>
+            <div className="side-sep" />
+            <div className="page-sub" style={{ margin: '0 0 10px' }}>历史会话（{runs.length}）</div>
+            <div className="list">
+              {runs.length === 0 && <div className="empty">暂无历史会话，发送第一条消息后自动创建。</div>}
+              {runs.map((r) => (
+                <div
+                  key={r.id}
+                  className={`list-item ${r.id === activeRunId ? 'selected' : ''}`}
+                  onClick={() => loadRun(r)}
+                >
+                  <div className="name">{runSummary(r)}</div>
+                  <div className="meta">
+                    {new Date(r.createdAt).toLocaleString()} · {RUN_STATUS[r.status] ?? r.status}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       <div className="main" style={{ display: 'flex', flexDirection: 'column', paddingBottom: 18 }}>
@@ -206,14 +273,14 @@ export default function Chat({ agents, workspaces, toolsets }) {
           <p className="page-sub">
             {agent.name} · 工具集 {toolsetLabel(agent.toolset)} · preset <code>{agent.presetId}</code>
             {workspace ? ` · cwd ${workspace.path}` : ' · cwd（引擎默认）'}
-            {sessionId ? ` · 会话 ${sessionId.slice(0, 8)}…（继续上次对话）` : ' · 新对话'}
+            {sessionId ? ` · 会话 ${sessionId.slice(0, 8)}…` : ' · 新对话（未创建）'}
           </p>
         ) : (
-          <p className="page-sub">从左侧选择一个 agent 开始试跑（自动恢复最近一次对话历史）。</p>
+          <p className="page-sub">从左侧选择一个 agent 开始试跑（自动恢复最近一次对话，历史会话见左侧列表）。</p>
         )}
         {err && <div className="banner err">{err}</div>}
         {muxStatus && <div className="banner info">事件流：{muxStatus}</div>}
-        {loadingHistory && <div className="banner info">正在恢复历史对话…</div>}
+        {loadingHistory && <div className="banner info">正在加载对话历史…</div>}
 
         <div className="chat-log" ref={logRef}>
           {feed.messages.length === 0 && (

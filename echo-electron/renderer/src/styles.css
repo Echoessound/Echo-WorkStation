@@ -60,6 +60,7 @@ body {
 .layout { display: flex; height: calc(100% - 52px); }
 .main { flex: 1; overflow: auto; padding: 20px 24px; }
 .side { width: 280px; border-right: 1px solid var(--border); background: var(--bg-2); overflow: auto; padding: 14px; }
+.side-sep { border-top: 1px solid var(--border); margin: 14px 0; }
 
 h1.page-title { font-size: 18px; margin: 0 0 4px; }
 .page-sub { color: var(--text-dim); font-size: 12.5px; margin: 0 0 18px; }

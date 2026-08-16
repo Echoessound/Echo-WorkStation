@@ -182,6 +182,7 @@ async function main() {
     console.log('\n[4] runs 记录 + 试跑闭环')
     let sessionId = null
     let runId = null
+    let run2Id = null
     try {
       const created = await rpc(base, 'session.create', { cwd: TEST_ROOT, agentPreset: agent.presetId })
       sessionId = created.sessionId
@@ -200,6 +201,16 @@ async function main() {
       check('创建 run 记录成功', !!runId && run.status === 'running', runId)
       const runList = await prod(base, `runs?agentId=${agent.id}`)
       check('按 agent 查询 run 列表', runList.items.some(r => r.id === runId), `共 ${runList.items.length} 条`)
+
+      // 多会话记录：同 agent 第二个 run（历史会话列表的数据基础）
+      const run2 = await prod(base, 'runs', {
+        method: 'POST',
+        body: { kind: 'chat', agentId: agent.id, workspaceId: ws.id, sessionId, input: { text: '第二次对话' } },
+      })
+      run2Id = run2.id
+      check('同 agent 创建第二个 run', !!run2.id && run2.id !== runId)
+      const runList2 = await prod(base, `runs?agentId=${agent.id}`)
+      check('run 列表倒序含两条（历史会话列表顺序）', runList2.items.length === 2 && runList2.items[0].id === run2.id)
 
       if (NO_LLM) {
         console.log('  （--no-llm 跳过真实试跑）')
@@ -237,7 +248,9 @@ async function main() {
     // ── 5. 清理 ───────────────────────────────────────────────
     console.log('\n[5] 清理')
     if (runId) {
-      await prod(base, `runs/${runId}`, { method: 'DELETE' })
+      for (const rid of [runId, run2Id].filter(Boolean)) {
+        await prod(base, `runs/${rid}`, { method: 'DELETE' })
+      }
       const runsAfter = await prod(base, `runs?agentId=${agent.id}`)
       check('删除 run 后列表为空', runsAfter.items.length === 0)
     }
