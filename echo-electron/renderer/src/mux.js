@@ -7,10 +7,11 @@
 
 /**
  * 订阅 mux 帧流。
- * @param {{ sessionId?: string, onEvent: (event: Object) => void, onStatus?: (s: string) => void }} opts
+ * @param {{ sessionId?: string, sessionIds?: string[], onEvent: (event: Object, sessionId: string) => void, onStatus?: (s: string) => void }} opts
+ *   sessionId / sessionIds 二选一（sessionIds 用于 workflow run 的多节点会话）；都不给则接收全部帧
  * @returns {{ close: () => void }}
  */
-export function subscribeMux({ sessionId, onEvent, onStatus }) {
+export function subscribeMux({ sessionId, sessionIds, onEvent, onStatus }) {
   let ws = null
   let closed = false
   let retry = 0
@@ -30,8 +31,13 @@ export function subscribeMux({ sessionId, onEvent, onStatus }) {
         if (msg?.type !== 'server-request') return
         const p = msg.payload ?? {}
         if (p.type !== 'session/event') return
-        if (sessionId && p.sessionId !== sessionId) return
-        onEvent(p.event)
+        const sid = p.sessionId
+        if (sessionIds) {
+          if (!sessionIds.includes(sid)) return
+        } else if (sessionId && sid !== sessionId) {
+          return
+        }
+        onEvent(p.event, sid)
       } catch { /* 忽略坏帧 */ }
     }
     ws.onclose = () => {

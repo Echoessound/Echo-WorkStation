@@ -170,4 +170,118 @@ h1.page-title { font-size: 18px; margin: 0 0 4px; }
 .empty { color: var(--text-dim); font-size: 13px; padding: 20px 0; text-align: center; }
 
 .mono { font-family: var(--mono); }
+
+/* ── Workflow（M2：设计器 + 运行中心）──────────────────── */
+.wf-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+}
+.wf-toolbar input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.wf-node {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  min-width: 150px;
+  font-size: 12.5px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.25);
+}
+.wf-node.wf-selected { border-color: var(--accent); }
+.wf-node .wf-node-title { font-weight: 600; color: var(--text); }
+.wf-node .wf-node-sub { color: var(--text-dim); font-size: 11.5px; margin-top: 2px; word-break: break-all; }
+.wf-node .wf-node-flag {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: #0d1117;
+  background: var(--warn);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+/* 节点状态着色（运行中心实时点亮） */
+.wf-node.pending { border-color: #475260; }
+.wf-node.running { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(76,154,255,.25); animation: wf-pulse 1.6s ease-in-out infinite; }
+.wf-node.success { border-color: var(--ok); box-shadow: 0 0 0 3px rgba(63,185,111,.2); }
+.wf-node.failed { border-color: var(--err); box-shadow: 0 0 0 3px rgba(229,83,75,.2); }
+.wf-node.awaiting_approval { border-color: var(--warn); box-shadow: 0 0 0 3px rgba(230,180,80,.25); }
+.wf-node.cancelled, .wf-node.interrupted { border-color: #5c6672; opacity: .7; }
+@keyframes wf-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(76,154,255,.15); }
+  50% { box-shadow: 0 0 0 5px rgba(76,154,255,.4); }
+}
+
+.wf-empty-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 13px;
+  pointer-events: none;
+  padding: 20px;
+  text-align: center;
+}
+
+.wf-inspector {
+  position: absolute;
+  right: 12px;
+  top: 64px;
+  bottom: 12px;
+  width: 320px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  overflow: auto;
+  z-index: 5;
+  box-shadow: 0 4px 16px rgba(0,0,0,.35);
+}
+.wf-inspector h4 { margin: 0 0 10px; font-size: 14px; }
+.wf-check { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--text); margin-top: 10px; cursor: pointer; }
+
+.wf-run-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+  font-size: 13px;
+}
+.wf-badge {
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.wf-badge.running { color: var(--accent-2); border-color: var(--accent); }
+.wf-badge.success { color: var(--ok); border-color: var(--ok); }
+.wf-badge.failed { color: var(--err); border-color: var(--err); }
+.wf-badge.cancelled { color: var(--text-dim); }
+
+.wf-event-log {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 6px;
+  max-height: 340px;
+  overflow: auto;
+  font-size: 12px;
+}
 code, .code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding: 1px 5px; border-radius: 4px; }

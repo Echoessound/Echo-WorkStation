@@ -3,11 +3,15 @@ import { product, sessions } from './api.js'
 import Workspaces from './pages/Workspaces.jsx'
 import Agents from './pages/Agents.jsx'
 import Chat from './pages/Chat.jsx'
+import Workflows from './pages/Workflows.jsx'
+import Runs from './pages/Runs.jsx'
 
 const TABS = [
   { id: 'workspaces', label: '工作区', component: Workspaces },
   { id: 'agents', label: 'Agents', component: Agents },
   { id: 'chat', label: 'Chat', component: Chat },
+  { id: 'workflows', label: 'Workflow 设计', component: Workflows },
+  { id: 'runs', label: '运行中心', component: Runs },
 ]
 
 export default function App() {

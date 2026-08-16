@@ -129,6 +129,20 @@ CREATE TABLE IF NOT EXISTS llm_usage (
   cost            REAL NOT NULL DEFAULT 0,
   created_at      INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS workflow_run_nodes (
+  id          TEXT PRIMARY KEY,
+  run_id      TEXT NOT NULL,
+  node_key    TEXT NOT NULL,
+  agent_id    TEXT,
+  session_id  TEXT,
+  status      TEXT NOT NULL DEFAULT 'pending',
+  output_json TEXT,
+  error       TEXT,
+  started_at  INTEGER,
+  finished_at INTEGER,
+  created_at  INTEGER
+);
 `
 
 /** 默认数据库文件位置（echo-electron/data/echo-product.db） */
@@ -186,14 +200,25 @@ async function openProductDb({ dbPath = defaultDbPath() } = {}) {
     return all(sql, params)[0]
   }
 
-  /** 事务执行一组写操作，最后统一持久化一次 */
+  /** 事务内的写语句：不 persist（persist → export 会隐式结束事务，见 debug-exec 踩坑） */
+  function rawRun(sql, params = []) {
+    const stmt = db.prepare(sql)
+    try {
+      stmt.bind(params)
+      while (stmt.step()) { /* 消费所有行 */ }
+    } finally {
+      stmt.free()
+    }
+  }
+
+  /** 事务执行一组写操作，最后统一持久化一次（事务内禁止 persist） */
   function exec(fn) {
     db.run('BEGIN')
     try {
-      fn({ run, all, get })
+      fn({ run: rawRun, all, get })
       db.run('COMMIT')
     } catch (err) {
-      db.run('ROLLBACK')
+      try { db.run('ROLLBACK') } catch { /* 事务可能已结束 */ }
       throw err
     }
     persist()

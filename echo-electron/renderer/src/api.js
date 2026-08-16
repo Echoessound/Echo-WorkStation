@@ -74,4 +74,17 @@ export const product = {
   listRuns: (agentId) => prod(`runs${agentId ? `?agentId=${encodeURIComponent(agentId)}` : ''}`),
   createRun: (body) => prod('runs', { method: 'POST', body }),
   updateRun: (id, body) => prod(`runs/${id}`, { method: 'PUT', body }),
+
+  listWorkflows: () => prod('workflows'),
+  getWorkflow: (id) => prod(`workflows/${id}`),
+  createWorkflow: (body) => prod('workflows', { method: 'POST', body }),
+  updateWorkflow: (id, body) => prod(`workflows/${id}`, { method: 'PUT', body }),
+  deleteWorkflow: (id) => prod(`workflows/${id}`, { method: 'DELETE' }),
+  seedReviewWorkflow: () => prod('workflows/seed/review', { method: 'POST' }),
+  startWorkflowRun: (id, input) => prod(`workflows/${id}/run`, { method: 'POST', body: { input } }),
+  listWorkflowRuns: (id) => prod(`workflows/${id}/runs`),
+  getWorkflowRun: (runId) => prod(`workflows/runs/${runId}`),
+  cancelWorkflowRun: (runId) => prod(`workflows/runs/${runId}/cancel`, { method: 'POST' }),
+  resumeWorkflowRun: (runId) => prod(`workflows/runs/${runId}/resume`, { method: 'POST' }),
+  approveWorkflowNode: (runId, nodeKey) => prod(`workflows/runs/${runId}/nodes/${nodeKey}/approve`, { method: 'POST' }),
 }

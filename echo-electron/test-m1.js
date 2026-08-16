@@ -14,6 +14,7 @@
 const { spawn } = require('node:child_process')
 const net = require('node:net')
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
 const { startUiServer } = require('./proxy-server.js')
 const { openProductDb } = require('./product/db.js')
@@ -119,6 +120,10 @@ function collectTurn(wsUrl, sessionId, timeoutMs) {
 async function main() {
   fs.rmSync(TEST_ROOT, { recursive: true, force: true })
   fs.mkdirSync(TEST_ROOT, { recursive: true })
+  // 复制真实 credentials（API key）到测试 DSH_HOME：harness 调 LLM 需要
+  const realCred = path.join(os.homedir(), '.dsh', '.credentials.yaml')
+  fs.mkdirSync(DSH_HOME, { recursive: true })
+  if (fs.existsSync(realCred)) fs.copyFileSync(realCred, path.join(DSH_HOME, '.credentials.yaml'))
 
   const harnessPort = await freePort()
   const child = spawn('node', [HARNESS_BIN, '--profile', 'web', '--port', String(harnessPort)], {

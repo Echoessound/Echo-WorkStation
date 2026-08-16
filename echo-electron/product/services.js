@@ -56,12 +56,12 @@ function readToolsetTemplate(toolset) {
 
 /**
  * 把用户系统提示词渲染进模板（YAML 字面块，保留换行）。
- * 每行按 persona.config.text 的缩进（6 空格）写入。
+ * 模板里占位符所在行已带 6 空格缩进（首行沿用），后续行补同样的缩进。
  */
 function renderComposition(template, systemPrompt) {
   const lines = String(systemPrompt ?? '').split('\n')
-  const indented = lines.map((line) => `      ${line}`).join('\n')
-  return template.replace('__ECHO_SYSTEM_PROMPT__', indented)
+  const body = lines.map((line, i) => (i === 0 ? line : `      ${line}`)).join('\n')
+  return template.replace('__ECHO_SYSTEM_PROMPT__', body)
 }
 
 /** 渲染 preset.yml（显示名 + 描述） */
@@ -91,6 +91,23 @@ function removeAgentPreset(agentId) {
   try {
     fs.rmSync(dir, { recursive: true, force: true })
   } catch { /* 已不存在 */ }
+}
+
+/**
+ * persona 模板变量校验：harness persona 插件只注册 provider/model/cwd，
+ * 其他 {{xxx}} 会在挂载时报 agent-preset-invalid（实测）。
+ * 业务变量（{{input}}/{{node:key}}）属于 workflow 节点 prompt，由 Echo 引擎渲染。
+ */
+const PERSONA_VARS = new Set(['provider', 'model', 'cwd'])
+function checkPersonaVars(text) {
+  for (const m of String(text ?? '').matchAll(/\{\{([a-zA-Z0-9_-]+)\}\}/g)) {
+    if (!PERSONA_VARS.has(m[1])) {
+      throw new Error(
+        `系统提示词含 harness 未注册的模板变量 {{${m[1]}}}（persona 仅支持 {{provider}}/{{model}}/{{cwd}}）；` +
+        '业务变量请在 workflow 节点 prompt 里使用 {{input}}/{{node:key}}',
+      )
+    }
+  }
 }
 
 // ── 行 → 对象 / 对象 → 行 映射 ──────────────────────────────────────────────
@@ -214,6 +231,7 @@ function createAgentService(db) {
       const { name, description = '', systemPrompt = '', toolset = 'basic' } = input
       if (!name) throw new Error('agent 需要 name')
       if (!TOOLSETS.some((t) => t.id === toolset)) throw new Error(`未知工具集: ${toolset}`)
+      checkPersonaVars(systemPrompt)
       const now = Date.now()
       const id = newId()
       const presetId = `echo-${id}`
@@ -260,6 +278,7 @@ function createAgentService(db) {
         updatedAt: now,
       }
       if (!TOOLSETS.some((t) => t.id === merged.toolset)) throw new Error(`未知工具集: ${merged.toolset}`)
+      checkPersonaVars(merged.systemPrompt)
       db.run(
         `UPDATE agents SET name = ?, description = ?, system_prompt = ?, model_json = ?, toolset = ?,
            workspace_id = ?, params_json = ?, updated_at = ? WHERE id = ?`,
@@ -294,11 +313,16 @@ function createAgentService(db) {
 
 function createRunService(db) {
   return {
-    /** 列出 run（可选按 agentId 过滤），created_at 倒序 */
-    async list({ agentId } = {}) {
-      const rows = agentId
-        ? db.all('SELECT * FROM runs WHERE agent_id = ? ORDER BY created_at DESC', [agentId])
-        : db.all('SELECT * FROM runs ORDER BY created_at DESC')
+    /** 列出 run（可选按 agentId / templateId 过滤），created_at 倒序 */
+    async list({ agentId, templateId } = {}) {
+      let rows
+      if (agentId) {
+        rows = db.all('SELECT * FROM runs WHERE agent_id = ? ORDER BY created_at DESC', [agentId])
+      } else if (templateId) {
+        rows = db.all('SELECT * FROM runs WHERE template_id = ? ORDER BY created_at DESC', [templateId])
+      } else {
+        rows = db.all('SELECT * FROM runs ORDER BY created_at DESC')
+      }
       return rows.map(runRow)
     },
 

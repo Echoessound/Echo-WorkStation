@@ -89,12 +89,22 @@ app.whenReady().then(async () => {
     await startHarness(port)
     // M1：产品域存储（sql.js）——轨迹留在 harness 会话日志，这里只存产品域
     productDb = await openProductDb()
-    const productRouter = createProductRouter({ db: productDb })
+    // M2：workflow 引擎（调度 harness 会话）需要 harness 的 /api 基址
+    const { handle: productRouter, workflowEngine } = createProductRouter({
+      db: productDb,
+      harnessBase: `http://127.0.0.1:${port}/api`,
+    })
     // 应用重启后若 preset 文件丢失（如用户手动删除），重新生成
     const agentService = createAgentService(productDb)
     void agentService.ensurePresets().then(n => {
       if (n > 0) console.log(`[product] ensured ${n} agent preset(s)`)
     }).catch(err => console.error('[product] ensurePresets failed:', err.message))
+    // M2：恢复上次中断的 workflow 运行（标记 interrupted，可 resume）
+    if (workflowEngine) {
+      void workflowEngine.recover().then(n => {
+        if (n > 0) console.log(`[workflow] recovered ${n} interrupted run(s)`)
+      }).catch(err => console.error('[workflow] recover failed:', err.message))
+    }
     // M0.5：serve 我们自己的渲染页（Vite 构建产物），/api 代理 + /prod 产品域
     ui = await startUiServer({ harnessOrigin: `http://127.0.0.1:${port}`, port: 0, productRouter })
     console.log(`[ui] echo page: http://127.0.0.1:${ui.port} (proxy -> ${port})`)

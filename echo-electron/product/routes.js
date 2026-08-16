@@ -10,6 +10,8 @@
  *  - 资源路径：/prod/workspaces[/:id]、/prod/agents[/:id]
  */
 const { createWorkspaceService, createAgentService, createRunService, resolveDshHome, userPresetRoot } = require('./services.js')
+const { createWorkflowService } = require('./workflow-service.js')
+const { createWorkflowEngine } = require('./workflow-engine.js')
 
 function sendJson(res, status, body) {
   const payload = JSON.stringify(body)
@@ -48,15 +50,21 @@ function readBody(req) {
 
 /**
  * 创建产品域路由器。
- * @param {{ db: ProductDb }} deps openProductDb() 的返回值
- * @returns {(req, res) => Promise<boolean>} 处理 /prod/* 请求；返回是否已消费
+ * @param {{ db: ProductDb, harnessBase?: string }} deps
+ *   harnessBase 形如 http://127.0.0.1:<port>/api（workflow 引擎调 harness 用）
+ * @returns {{ handle: (req, res) => Promise<boolean>, workflowEngine: object }}
+ *   handle 处理 /prod/* 请求；返回是否已消费
  */
-function createProductRouter({ db }) {
+function createProductRouter({ db, harnessBase }) {
   const workspaces = createWorkspaceService(db)
   const agents = createAgentService(db)
   const runs = createRunService(db)
+  const workflows = createWorkflowService(db, agents)
+  const workflowEngine = harnessBase
+    ? createWorkflowEngine({ db, runService: runs, workflowService: workflows, agentService: agents, harnessBase })
+    : null
 
-  return async function handle(req, res) {
+  async function handle(req, res) {
     if (req.method !== 'GET' && req.method !== 'POST' && req.method !== 'PUT' && req.method !== 'DELETE') {
       return false
     }
@@ -143,6 +151,65 @@ function createProductRouter({ db }) {
         }
       }
 
+      // ── workflows（M2：DAG 模板 + 运行）──────────────────────
+      // 路径形态：/workflows | /workflows/:id | /workflows/seed/review
+      //   | /workflows/:id/run | /workflows/:id/runs
+      //   | /workflows/runs/:runId[ /cancel | /resume | /nodes/:key/approve ]
+      if (resource === 'workflows') {
+        const [p1, p2, p3, p4, p5] = parts.slice(1)
+        if (!workflowEngine) throw new Error('workflow 引擎未配置（缺少 harnessBase）')
+
+        // 列表 / 创建
+        if (!p1) {
+          if (req.method === 'GET') return ok(res, { items: await workflows.list() }), true
+          if (req.method === 'POST') {
+            const body = await readBody(req)
+            return ok(res, await workflows.create(body)), true
+          }
+        }
+        // 载入内置并行评审模板（幂等）
+        if (p1 === 'seed' && p2 === 'review' && req.method === 'POST') {
+          return ok(res, await workflows.seedReview()), true
+        }
+        // run 详情与操作
+        if (p1 === 'runs' && p2) {
+          if (p3 === 'cancel' && req.method === 'POST') {
+            await workflowEngine.cancelRun(p2)
+            return ok(res, { cancelled: p2 }), true
+          }
+          if (p3 === 'resume' && req.method === 'POST') {
+            await workflowEngine.resumeRun(p2)
+            return ok(res, { resumed: p2 }), true
+          }
+          if (p3 === 'nodes' && p5 === 'approve' && req.method === 'POST') {
+            await workflowEngine.approveNode(p2, p4)
+            return ok(res, { approved: p4 }), true
+          }
+          if (!p3 && req.method === 'GET') {
+            return ok(res, await workflowEngine.getRunDetail(p2)), true
+          }
+        }
+        // 模板详情 / 更新 / 删除 / 启动 / 运行历史
+        if (p1) {
+          if (!p2 && req.method === 'GET') return ok(res, await workflows.get(p1)), true
+          if (!p2 && req.method === 'PUT') {
+            const body = await readBody(req)
+            return ok(res, await workflows.update(p1, body)), true
+          }
+          if (!p2 && req.method === 'DELETE') {
+            await workflows.remove(p1)
+            return ok(res, { removed: p1 }), true
+          }
+          if (p2 === 'run' && req.method === 'POST') {
+            const body = await readBody(req)
+            return ok(res, await workflowEngine.startRun(p1, body.input ?? '')), true
+          }
+          if (p2 === 'runs' && req.method === 'GET') {
+            return ok(res, { items: await runs.list({ templateId: p1 }) }), true
+          }
+        }
+      }
+
       fail(res, new Error(`未知资源: /prod/${resource}`), 404)
       return true
     } catch (err) {
@@ -150,6 +217,8 @@ function createProductRouter({ db }) {
       return true
     }
   }
+
+  return { handle, workflowEngine }
 }
 
 module.exports = { createProductRouter }
