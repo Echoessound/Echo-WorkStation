@@ -1,0 +1,47 @@
+# Echo agent preset: basic toolset (shell + filesystem + todo)
+# 由 Echo Workstation AgentService 生成（toolset: basic）。
+# 轻量编码 agent：跨平台 shell（Windows=pwsh / 其他=bash）+ 本地文件系统 + 搜索 + 后台任务 + todo。
+# 行结构参考 shipped standard，persona 文本由 Echo 注入。
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: |
+      __ECHO_SYSTEM_PROMPT__
+
+# ── shell（跨平台：Windows 用 pwsh，其余用 bash）──────────────────────────
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+# ── filesystem ──────────────────────────────────────────────────────────────
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+# ── background jobs ─────────────────────────────────────────────────────────
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+
+# ── skills ──────────────────────────────────────────────────────────────────
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+# ── remaining model-facing rows ─────────────────────────────────────────────
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true

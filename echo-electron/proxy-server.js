@@ -1,11 +1,13 @@
 /**
- * proxy-server.js — M0.5 UI 服务器
+ * proxy-server.js — Echo UI 服务器（M0.5 + M1）
  *
  * 职责：让 Echo 自己的渲染页与 harness 的 /api 处于「同源」，从而绕开 CORS：
- *  1. 静态 serve renderer/ 目录（index.html + 后续的 JS/CSS 资源）
+ *  1. 静态 serve renderer/dist/（Vite 构建产物；M0 的 index.html 已被 Vite 入口取代）
  *  2. 把 /api/*（HTTP RPC）原样代理到 harness 端口
  *  3. 把 /api/events.mux、/api/events.host 的 WebSocket 升级转发到 harness（mux 下行单向，
  *     升级后做纯 TCP 管道即可）
+ *  4. M1 新增：/prod/* 交给产品域路由器（product/routes.js），提供
+ *     workspaces / agents 等产品域 CRUD（同源，无 CORS）
  *
  * 信任围栏：代理转发时保留 Host: 127.0.0.1:<harness端口>，loopback 天然通过 harness 的
  * 浏览器信任围栏（isTrustedApiRequest），无需改 harness 任何配置。
@@ -22,9 +24,18 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.map': 'application/json',
 }
 
-function startUiServer({ harnessOrigin, dir = path.join(__dirname, 'renderer'), port = 0, host = '127.0.0.1' }) {
+/**
+ * 启动 UI 服务器。
+ * @param {{ harnessOrigin: string, dir?: string, port?: number, host?: string, productRouter?: Function }} opts
+ *   dir 默认 renderer/dist（Vite 构建输出）；productRouter 为 (req,res)=>Promise<boolean>，命中 /prod/* 返回 true
+ */
+function startUiServer({ harnessOrigin, dir = path.join(__dirname, 'renderer', 'dist'), port = 0, host = '127.0.0.1', productRouter } = {}) {
   const harness = new URL(harnessOrigin)
 
   function proxyApi(req, res) {
@@ -54,7 +65,8 @@ function startUiServer({ harnessOrigin, dir = path.join(__dirname, 'renderer'), 
 
   function serveStatic(req, res) {
     const url = new URL(req.url, `http://${req.headers.host}`)
-    const file = url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname)
+    // SPA 回退：未知路径一律回退到 index.html（React Router 或前端路由用）
+    let file = url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname)
     const target = path.normalize(path.join(dir, file))
     if (!target.startsWith(path.normalize(dir))) {
       res.writeHead(403)
@@ -65,13 +77,34 @@ function startUiServer({ harnessOrigin, dir = path.join(__dirname, 'renderer'), 
       const data = fs.readFileSync(target)
       res.writeHead(200, { 'content-type': MIME[path.extname(target)] ?? 'application/octet-stream' })
       res.end(data)
+      return
     } catch {
+      // 命中 index.html 回退（SPA 路由；Vite 构建是单页应用）
+      if (!file.endsWith('.html')) {
+        try {
+          const fallback = fs.readFileSync(path.join(dir, 'index.html'))
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+          res.end(fallback)
+          return
+        } catch { /* fall through */ }
+      }
       res.writeHead(404)
       res.end('not found')
     }
   }
 
   const server = http.createServer((req, res) => {
+    if (req.url === '/prod' || req.url.startsWith('/prod/')) {
+      if (productRouter) {
+        void productRouter(req, res).then((handled) => {
+          if (!handled) serveStatic(req, res)
+        }).catch(() => {
+          try { res.writeHead(500); res.end('product router error') } catch { /* 已响应 */ }
+        })
+        return
+      }
+      res.writeHead(404); res.end('product api not configured'); return
+    }
     if (req.url === '/api' || req.url.startsWith('/api/')) proxyApi(req, res)
     else serveStatic(req, res)
   })

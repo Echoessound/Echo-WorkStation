@@ -1,0 +1,8 @@
+# Echo agent preset: persona only (no tools)
+# 由 Echo Workstation AgentService 生成（toolset: none）。
+# 仅 persona：模型直接对话，不挂任何工具。
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: |
+      __ECHO_SYSTEM_PROMPT__

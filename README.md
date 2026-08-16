@@ -6,13 +6,23 @@
 
 > 详细设计与改造方案见 [`echo-workstation-改造方案.md`](./echo-workstation-改造方案.md)。
 
-## 当前状态（M0 已完成 ✅）
+## 当前状态（M0 ✅ + M1 ✅）
+
+**M0 引擎对接（已完成）**
 
 - ✅ Electron 壳：主进程 spawn DeepSeek Harness（`dsh --profile web`）子进程，loopback 随机端口，就绪探测，退出回收
 - ✅ UI 代理层：静态 serve 自研渲染页 + `/api`（HTTP + WebSocket）同源代理，绕过 CORS 且通过 harness 信任围栏
 - ✅ 试跑闭环：`session.create → session.prompt → CoT 实时流 → 工具调用 → 最终回复 → token 用量`
 - ✅ 契约层 `echo-api.mjs`：harness 官方端点封装，供渲染层复用
 - ✅ 轨迹工具 `fetch-trajectory.mjs`：会话历史翻页导出（Markdown / JSON，可选含思维链 `--thinking`）
+
+**M1 产品域 + Chat（已完成）**
+
+- ✅ 产品域 SQLite（`sql.js` wasm，零 ABI 编译）：`workspaces / agents / workflow_templates / workflow_nodes / workflow_edges / runs / artifacts / llm_usage` 8 张表 + 文件持久化
+- ✅ `/prod/*` 产品域 API：Workspace / Agent CRUD（同源 REST，挂在 UI 服务器上）
+- ✅ **Agent preset 生成**：agent 定义（系统提示词 / 工具集）自动落盘为 `<dshHome>/.agent-presets/echo-<id>/agent.cordis.yml`，harness 实时扫描，`session.create({agentPreset})` 注入 persona
+- ✅ React + Vite 渲染层：Workspace 管理页、Agent 管理页（系统提示词 / 工具集 / 模型 / 工作区）、Chat 试跑面板（实时 CoT + 工具调用 + 回复流）
+- ✅ 集成验证 `test-m1.js`：19 项断言全过（含真实 LLM 回合）
 
 ## 架构
 
@@ -42,11 +52,15 @@
 cd echo-electron
 npm install
 
-# 2. 启动
+# 2. 构建渲染层（React + Vite；改 renderer/src 后需重跑）
+npm run build:renderer
+
+# 3. 启动
 npm start
 ```
 
-窗口打开后输入提示词点「试跑」，即可看到 CoT 实时流与工具调用。
+窗口打开后：在 **Agents** 页新建 agent（填系统提示词、选工具集），到 **Chat** 页选 agent 输提示词点「试跑」，
+即可看到 CoT 实时流、工具调用与最终回复。**Workspaces** 页管理工作区（agent 试跑的工作目录）。
 
 无 GPU / 受限沙箱环境（虚拟机、远程桌面）下 Electron 子进程会崩溃，已内置启动参数
 `--disable-gpu --no-sandbox`（详见下文「踩坑记录」）。
@@ -55,7 +69,9 @@ npm start
 
 ```powershell
 cd echo-electron
-node test-proxy.js    # 起隔离 harness → 验证静态页 / RPC / WebSocket 代理三关
+node test-proxy.js   # M0.5 三关：静态页 / RPC 代理 / WebSocket 升级
+node test-m1.js      # M1 集成：产品域 CRUD + preset 生成 + 真实试跑闭环（19 断言）
+node test-m1.js --no-llm   # 跳过真实 LLM 调用，快速验证链路
 ```
 
 ### 终端试跑闭环
@@ -70,7 +86,9 @@ node fetch-trajectory.mjs <sessionId> --thinking     # 导出含思维链的轨�
 
 | 路径 | 说明 |
 |---|---|
-| `echo-electron/` | Electron 应用（主进程 / 代理 / 渲染页 / 集成测试） |
+| `echo-electron/` | Electron 应用（主进程 / 代理 / 渲染页 / 产品域 / 集成测试） |
+| `echo-electron/product/` | M1 产品域：`db.js`（sql.js 8 表）、`services.js`（Workspace/Agent CRUD + preset 生成）、`routes.js`（/prod/* API）、`presets/`（工具集模板） |
+| `echo-electron/renderer/` | React + Vite 渲染层（`src/pages/`：Workspaces / Agents / Chat；`src/api.js`、`src/mux.js`） |
 | `echo-api.mjs` | harness 官方端点契约层 |
 | `echo-agent-demo.mjs` | M0 试跑闭环（WS 实时流 + 产物注册） |
 | `fetch-trajectory.mjs` | 会话轨迹导出工具 |
@@ -81,7 +99,7 @@ node fetch-trajectory.mjs <sessionId> --thinking     # 导出含思维链的轨�
 | 里程碑 | 状态 |
 |---|---|
 | M0 引擎对接（Electron 壳 + 代理 + 试跑闭环） | ✅ |
-| M1 产品域（workspace/agent CRUD + SQLite + Chat 面板） | 计划中 |
+| M1 产品域（workspace/agent CRUD + SQLite + Chat 面板） | ✅ |
 | M2 Workflow 设计器 + DAG 调度 + 运行中心 | 计划中 |
 | M3 产物管线 + 预览 + 论文工作流迁移 | 计划中 |
 | M4 打包发布 | 计划中 |

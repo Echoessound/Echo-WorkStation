@@ -1,14 +1,26 @@
 {
   "name": "echo-workstation",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
-  "description": "Echo Workstation M0 骨架：Electron 壳 + DeepSeek Harness 引擎（独立 Node 子进程），通过 /api + WebSocket 对接",
+  "description": "Echo Workstation M1：Electron 壳 + DeepSeek Harness 引擎 + 产品域（SQLite workspace/agent CRUD）+ React Chat 面板",
   "main": "main.js",
   "scripts": {
+    "build:renderer": "vite build --config renderer/vite.config.mjs",
+    "dev:renderer": "vite --config renderer/vite.config.mjs",
     "start": "electron . --disable-gpu --no-sandbox",
-    "start:no-sandbox": "electron . --disable-gpu --no-sandbox"
+    "start:no-sandbox": "electron . --disable-gpu --no-sandbox",
+    "test:proxy": "node test-proxy.js",
+    "test:m1": "node test-m1.js",
+    "test:m1:no-llm": "node test-m1.js --no-llm"
   },
   "devDependencies": {
-    "electron": "^33.0.0"
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "^33.0.0",
+    "vite": "^5.4.21"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sql.js": "^1.14.1"
   }
 }

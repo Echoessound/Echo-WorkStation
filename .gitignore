@@ -1,6 +1,7 @@
 # ---- Node / Electron ----
 node_modules/
 *.log
+.npm-cache/
 
 # ---- Echo 运行产物（不入库）----
 echo-demo-report-*.json
@@ -11,6 +12,10 @@ thinking-sample.md
 measure-*
 .dsh-boot-measure*/
 dev-boot*.log
+
+# ---- Echo 运行时数据与构建产物 ----
+echo-electron/data/
+echo-electron/renderer/dist/
 
 # ---- 个人调研文档（如需公开请手动 git add -f）----
 DeepSeek-Harness调研报告_v1.md

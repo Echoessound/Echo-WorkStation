@@ -16,6 +16,9 @@ const { spawn } = require('node:child_process')
 const net = require('node:net')
 const path = require('node:path')
 const { startUiServer } = require('./proxy-server.js')
+const { openProductDb } = require('./product/db.js')
+const { createProductRouter } = require('./product/routes.js')
+const { createAgentService } = require('./product/services.js')
 
 // 无 GPU 环境（虚拟机/远程桌面/显卡驱动缺失）下，Electron 的 GPU 进程会启动失败
 // （exit_code=-1073741515 / 0xC0000135）并导致整个应用退出。Echo 是纯文本 UI，
@@ -60,6 +63,7 @@ async function waitHarnessReady(base, timeoutMs = 30_000) {
 
 let child = null
 let ui = null
+let productDb = null
 
 async function startHarness(port) {
   // 子进程 cwd 用 echo-electron 自身目录：工作区与用户正在跑的 GUI 隔离，互不干扰
@@ -77,10 +81,22 @@ async function startHarness(port) {
 
 app.whenReady().then(async () => {
   try {
+    const distDir = path.join(__dirname, 'renderer', 'dist')
+    if (!require('node:fs').existsSync(path.join(distDir, 'index.html'))) {
+      console.error('[ui] renderer/dist 缺失，请先执行 npm run build:renderer')
+    }
     const port = await freePort()
     await startHarness(port)
-    // M0.5：serve 我们自己的渲染页，并把 /api（HTTP + WebSocket）同源代理到 harness
-    ui = await startUiServer({ harnessOrigin: `http://127.0.0.1:${port}`, port: 0 })
+    // M1：产品域存储（sql.js）——轨迹留在 harness 会话日志，这里只存产品域
+    productDb = await openProductDb()
+    const productRouter = createProductRouter({ db: productDb })
+    // 应用重启后若 preset 文件丢失（如用户手动删除），重新生成
+    const agentService = createAgentService(productDb)
+    void agentService.ensurePresets().then(n => {
+      if (n > 0) console.log(`[product] ensured ${n} agent preset(s)`)
+    }).catch(err => console.error('[product] ensurePresets failed:', err.message))
+    // M0.5：serve 我们自己的渲染页（Vite 构建产物），/api 代理 + /prod 产品域
+    ui = await startUiServer({ harnessOrigin: `http://127.0.0.1:${port}`, port: 0, productRouter })
     console.log(`[ui] echo page: http://127.0.0.1:${ui.port} (proxy -> ${port})`)
     const win = new BrowserWindow({
       width: 1280,
@@ -135,4 +151,5 @@ app.on('quit', () => {
   // （如原生目录选择器），可换成 taskkill /PID <pid> /T /F 整树回收。
   if (child && !child.killed) child.kill()
   if (ui !== undefined) void ui.close()
+  if (productDb) { try { productDb.close() } catch { /* 已关闭 */ } }
 })
