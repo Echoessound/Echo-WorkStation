@@ -30,6 +30,7 @@ const NODE_RUNNING = 'running'
 const NODE_SUCCESS = 'success'
 const NODE_FAILED = 'failed'
 const NODE_AWAITING = 'awaiting_approval'
+const NODE_APPROVED = 'approved' // 已批准、待启动（短暂状态，防止 schedule 把审批节点二次挂起）
 const NODE_CANCELLED = 'cancelled'
 const NODE_INTERRUPTED = 'interrupted'
 
@@ -81,11 +82,12 @@ function textOf(msg) {
   return ''
 }
 
-/** 提示词模板渲染：{{input}} 与 {{node:<key>}} */
-function renderPrompt(template, { input, nodeOutputs }) {
+/** 提示词模板渲染：{{input}}、{{workspace}}（运行目标目录）与 {{node:<key>}} */
+function renderPrompt(template, { input, workspace, nodeOutputs }) {
   let missing = null
-  const out = template.replace(/\{\{(input|node:([a-zA-Z0-9_-]+))\}\}/g, (whole, kind, nodeKey) => {
+  const out = template.replace(/\{\{(input|workspace|node:([a-zA-Z0-9_-]+))\}\}/g, (whole, kind, nodeKey) => {
     if (kind === 'input') return input ?? ''
+    if (kind === 'workspace') return workspace ?? ''
     const value = nodeOutputs[nodeKey]
     if (value === undefined || value === null) {
       missing = missing ?? nodeKey
@@ -188,9 +190,12 @@ function createWorkflowEngine({ db, runService, workflowService, agentService, h
 
   /**
    * 启动一次 workflow 运行：快照定义 → 建 run + node runs → 开始调度。
+   * @param {string} templateId
+   * @param {string} input 运行输入文本（{{input}}）
+   * @param {string|null} workspace 目标目录（{{workspace}}；节点会话 cwd 的兜底）
    * @returns {Promise<{runId}>}
    */
-  async function startRun(templateId, input) {
+  async function startRun(templateId, input, workspace = null) {
     const wf = await workflowService.get(templateId)
     if (!wf) throw new Error('workflow 模板不存在')
     const snapshot = {
@@ -207,7 +212,7 @@ function createWorkflowEngine({ db, runService, workflowService, agentService, h
     const run = await runService.create({
       kind: 'workflow',
       templateId,
-      input: { input: input ?? '', template: snapshot },
+      input: { input: input ?? '', workspace: workspace ?? null, template: snapshot },
     })
     const now = Date.now()
     for (const node of snapshot.nodes) {
@@ -220,58 +225,71 @@ function createWorkflowEngine({ db, runService, workflowService, agentService, h
     return { runId: run.id }
   }
 
-  /** 调度一批就绪节点；全部终态时收敛 run 状态 */
+  /** 调度一批就绪节点；全部终态时收敛 run 状态。
+   *  全程容错：进程退出/DB 关闭后，飞行中的调度链必须静默结束而不是崩溃。 */
   async function schedule(runId) {
-    const run = readRun(db, runId)
-    if (!run || run.status !== RUN_RUNNING) return
-    const def = run.input?.template ?? { nodes: [], edges: [] }
-    const nodeRuns = readNodeRuns(db, runId)
-    const outputs = {}
-    for (const nr of nodeRuns) if (nr.status === NODE_SUCCESS) outputs[nr.nodeKey] = nr.output
+    try {
+      const run = readRun(db, runId)
+      if (!run || run.status !== RUN_RUNNING) return
+      const def = run.input?.template ?? { nodes: [], edges: [] }
+      const nodeRuns = readNodeRuns(db, runId)
+      const outputs = {}
+      for (const nr of nodeRuns) if (nr.status === NODE_SUCCESS) outputs[nr.nodeKey] = nr.output
 
-    const ready = nodeRuns.filter((nr) => {
-      if (nr.status !== NODE_PENDING) return false
-      const upstream = def.edges.filter((e) => e.target === nr.nodeKey).map((e) => e.source)
-      return upstream.every((src) => outputs[src] !== undefined)
-    })
+      const ready = nodeRuns.filter((nr) => {
+        if (nr.status !== NODE_PENDING && nr.status !== NODE_APPROVED) return false
+        const upstream = def.edges.filter((e) => e.target === nr.nodeKey).map((e) => e.source)
+        return upstream.every((src) => outputs[src] !== undefined)
+      })
 
-    for (const nr of ready) {
-      const nodeDef = def.nodes.find((n) => n.key === nr.nodeKey)
-      if (nodeDef?.requiresApproval) {
-        updateNodeRun(db, nr.id, { status: NODE_AWAITING })
-      } else {
-        void startNode(runId, nr, nodeDef, outputs).catch((err) => {
-          console.error(`[workflow] 节点 ${nr.nodeKey} 启动异常:`, err.message)
-          // 只有仍在 running 才算失败；cancelled/interrupted 是外部状态变更，保留
-          const cur = readNodeRuns(db, runId).find((n) => n.id === nr.id)
-          if (cur && cur.status === NODE_RUNNING) {
-            updateNodeRun(db, nr.id, { status: NODE_FAILED, error: err.message, finishedAt: Date.now() })
-          }
-          void schedule(runId)
-        })
+      for (const nr of ready) {
+        const nodeDef = def.nodes.find((n) => n.key === nr.nodeKey)
+        // 审批节点仅在首次就绪（pending）时挂起；approved 表示人工已放行，直接启动
+        if (nodeDef?.requiresApproval && nr.status === NODE_PENDING) {
+          updateNodeRun(db, nr.id, { status: NODE_AWAITING })
+        } else {
+          void startNode(runId, nr, nodeDef, outputs).catch((err) => {
+            try {
+              console.error(`[workflow] 节点 ${nr.nodeKey} 启动异常:`, err.message)
+              // 只有仍在 running 才算失败；cancelled/interrupted 是外部状态变更，保留
+              const cur = readNodeRuns(db, runId).find((n) => n.id === nr.id)
+              if (cur && cur.status === NODE_RUNNING) {
+                updateNodeRun(db, nr.id, { status: NODE_FAILED, error: err.message, finishedAt: Date.now() })
+              }
+            } catch { /* db closed 等，静默 */ }
+            try { void schedule(runId) } catch { /* noop */ }
+          })
+        }
       }
-    }
 
-    converge(runId)
+      converge(runId)
+    } catch (err) {
+      // database closed / 其他清理期竞态：静默结束
+      console.warn('[workflow] schedule failed:', err.message)
+    }
   }
 
   /** 收敛 run 终态（无 pending/running 节点时） */
   function converge(runId) {
-    const run = readRun(db, runId)
-    if (!run || run.status !== RUN_RUNNING) return
-    const nodeRuns = readNodeRuns(db, runId)
-    const active = nodeRuns.some((n) => [NODE_PENDING, NODE_RUNNING, NODE_AWAITING].includes(n.status))
-    if (active) return
-    const failedNodes = nodeRuns.filter((n) => n.status === NODE_FAILED)
-    if (failedNodes.length > 0) {
-      updateRunStatus(db, runId, RUN_FAILED, {
-        finishedAt: Date.now(),
-        error: `节点失败: ${failedNodes.map((n) => `${n.nodeKey}(${n.error ?? '未知错误'})`).join('; ')}`,
-      })
-    } else {
-      const output = {}
-      for (const nr of nodeRuns) output[nr.nodeKey] = nr.output
-      updateRunStatus(db, runId, RUN_SUCCESS, { finishedAt: Date.now(), output })
+    try {
+      const run = readRun(db, runId)
+      if (!run || run.status !== RUN_RUNNING) return
+      const nodeRuns = readNodeRuns(db, runId)
+      const active = nodeRuns.some((n) => [NODE_PENDING, NODE_RUNNING, NODE_AWAITING, NODE_APPROVED].includes(n.status))
+      if (active) return
+      const failedNodes = nodeRuns.filter((n) => n.status === NODE_FAILED)
+      if (failedNodes.length > 0) {
+        updateRunStatus(db, runId, RUN_FAILED, {
+          finishedAt: Date.now(),
+          error: `节点失败: ${failedNodes.map((n) => `${n.nodeKey}(${n.error ?? '未知错误'})`).join('; ')}`,
+        })
+      } else {
+        const output = {}
+        for (const nr of nodeRuns) output[nr.nodeKey] = nr.output
+        updateRunStatus(db, runId, RUN_SUCCESS, { finishedAt: Date.now(), output })
+      }
+    } catch (err) {
+      console.warn('[workflow] converge failed:', err.message)
     }
   }
 
@@ -282,13 +300,20 @@ function createWorkflowEngine({ db, runService, workflowService, agentService, h
     const agent = await agentService.get(nodeDef.agentId)
     if (!agent) throw new Error(`agent 不存在: ${nodeDef.agentId}`)
 
-    const prompt = renderPrompt(nodeDef.prompt, { input: readRun(db, runId)?.input?.input ?? '', nodeOutputs: outputs })
+    const runInput = readRun(db, runId)?.input ?? {}
+    const prompt = renderPrompt(nodeDef.prompt, {
+      input: runInput.input ?? '',
+      workspace: runInput.workspace ?? '',
+      nodeOutputs: outputs,
+    })
 
     const createPayload = { agentPreset: agent.presetId }
-    // cwd：agent 关联的 workspace path
+    // cwd 优先级：agent 关联的 workspace path → 运行的 target 目录（workspace）→ 省略（harness 默认）
     if (agent.workspaceId) {
       const wsRow = db.get('SELECT * FROM workspaces WHERE id = ?', [agent.workspaceId])
       if (wsRow?.path) createPayload.cwd = wsRow.path
+    } else if (runInput.workspace) {
+      createPayload.cwd = runInput.workspace
     }
 
     const created = await rpc('session.create', createPayload)
@@ -356,12 +381,12 @@ function createWorkflowEngine({ db, runService, workflowService, agentService, h
     updateRunStatus(db, runId, RUN_CANCELLED, { finishedAt: Date.now(), error: '已取消' })
   }
 
-  /** 审批放行一个等待节点 */
+  /** 审批放行一个等待节点：AWAITING → APPROVED（已批准待启动）→ 重新调度 */
   async function approveNode(runId, nodeKey) {
     const nr = readNodeRuns(db, runId).find((n) => n.nodeKey === nodeKey)
     if (!nr) throw new Error('节点不存在')
     if (nr.status !== NODE_AWAITING) throw new Error(`节点不在等待审批状态（当前: ${nr.status}）`)
-    updateNodeRun(db, nr.id, { status: NODE_PENDING })
+    updateNodeRun(db, nr.id, { status: NODE_APPROVED })
     await schedule(runId)
   }
 
@@ -411,5 +436,5 @@ module.exports = {
   createWorkflowEngine,
   extractOutput,
   renderPrompt,
-  NODE_STATUSES: [NODE_PENDING, NODE_RUNNING, NODE_SUCCESS, NODE_FAILED, NODE_AWAITING, NODE_CANCELLED, NODE_INTERRUPTED],
+  NODE_STATUSES: [NODE_PENDING, NODE_RUNNING, NODE_SUCCESS, NODE_FAILED, NODE_AWAITING, NODE_APPROVED, NODE_CANCELLED, NODE_INTERRUPTED],
 }

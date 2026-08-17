@@ -202,7 +202,7 @@ function createProductRouter({ db, harnessBase }) {
           }
           if (p2 === 'run' && req.method === 'POST') {
             const body = await readBody(req)
-            return ok(res, await workflowEngine.startRun(p1, body.input ?? '')), true
+            return ok(res, await workflowEngine.startRun(p1, body.input ?? '', body.workspace ?? null)), true
           }
           if (p2 === 'runs' && req.method === 'GET') {
             return ok(res, { items: await runs.list({ templateId: p1 }) }), true

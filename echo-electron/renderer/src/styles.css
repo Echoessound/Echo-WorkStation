@@ -191,6 +191,7 @@ h1.page-title { font-size: 18px; margin: 0 0 4px; }
 }
 
 .wf-node {
+  position: relative;
   background: var(--bg-3);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -236,19 +237,42 @@ h1.page-title { font-size: 18px; margin: 0 0 4px; }
   text-align: center;
 }
 
+/* 连线把手：默认 6px 深色几乎不可见，加大加亮（用户反馈"节点不能相连"的根因） */
+.wf-node .react-flow__handle {
+  width: 13px;
+  height: 13px;
+  background: var(--accent);
+  border: 2px solid #0d1117;
+  border-radius: 50%;
+  z-index: 6;
+  transition: transform .12s ease, background .12s ease;
+}
+.wf-node .react-flow__handle:hover { background: var(--accent-2); }
+.wf-node .react-flow__handle-left { left: -1px; }
+.wf-node .react-flow__handle-left:hover { transform: translate(-50%, -50%) scale(1.5); }
+.wf-node .react-flow__handle-right { right: -1px; }
+.wf-node .react-flow__handle-right:hover { transform: translate(50%, -50%) scale(1.5); }
+/* 连接进行中：起点蓝、可接目标绿，方向一目了然 */
+.wf-node .react-flow__handle.connectingfrom { background: var(--accent-2); }
+.wf-node .react-flow__handle.connectingto { background: var(--ok); }
+.wf-node .react-flow__handle-left.connectingfrom,
+.wf-node .react-flow__handle-left.connectingto { transform: translate(-50%, -50%) scale(1.55); }
+.wf-node .react-flow__handle-right.connectingfrom,
+.wf-node .react-flow__handle-right.connectingto { transform: translate(50%, -50%) scale(1.55); }
+
+/* 已建边：选中高亮 + 悬停变粗（方向由箭头表达） */
+.react-flow__edge path { transition: stroke .12s; }
+.react-flow__edge:hover path { stroke: var(--accent-2); stroke-width: 2.4; }
+.react-flow__edge.selected path { stroke: var(--accent); stroke-width: 2.6; }
+
 .wf-inspector {
-  position: absolute;
-  right: 12px;
-  top: 64px;
-  bottom: 12px;
-  width: 320px;
+  width: 264px;
+  flex-shrink: 0;
   background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 14px;
+  border-left: 1px solid var(--border);
+  padding: 12px;
   overflow: auto;
-  z-index: 5;
-  box-shadow: 0 4px 16px rgba(0,0,0,.35);
+  font-size: 12.5px;
 }
 .wf-inspector h4 { margin: 0 0 10px; font-size: 14px; }
 .wf-check { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--text); margin-top: 10px; cursor: pointer; }

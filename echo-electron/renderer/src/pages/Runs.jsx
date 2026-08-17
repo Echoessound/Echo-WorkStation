@@ -9,11 +9,11 @@ const RUN_STATUS_LABEL = {
 }
 const NODE_STATUS_LABEL = {
   pending: '待开始', running: '运行中', success: '成功', failed: '失败',
-  awaiting_approval: '等待审批', cancelled: '已取消', interrupted: '已中断',
+  awaiting_approval: '等待审批', approved: '已批准', cancelled: '已取消', interrupted: '已中断',
 }
 const RUN_ACTIVE = ['pending', 'running']
 
-function StatusNodeView({ id, data, selected }) {
+const StatusNodeView = React.memo(function StatusNodeView({ id, data, selected }) {
   return (
     <div className={`wf-node ${data.status ?? 'pending'} ${selected ? 'wf-selected' : ''}`}>
       <Handle type="target" position={Position.Left} />
@@ -22,18 +22,19 @@ function StatusNodeView({ id, data, selected }) {
       <Handle type="source" position={Position.Right} />
     </div>
   )
-}
+})
 const nodeTypes = { workNode: StatusNodeView }
 
 const EMPTY_FEED = { messages: [], blocks: {}, turn: null, turnStart: 0, turnEnded: false }
 
-function RunsInner({ agents }) {
+function RunsInner({ agents, workspaces }) {
   const [templates, setTemplates] = useState([])
   const [templateId, setTemplateId] = useState(null)
   const [runs, setRuns] = useState([])
   const [runId, setRunId] = useState(null)
   const [detail, setDetail] = useState(null) // {run, nodes}
   const [input, setInput] = useState('')
+  const [targetPath, setTargetPath] = useState('') // 目标目录（{{workspace}} / 节点 cwd 兜底）
   const [selectedKey, setSelectedKey] = useState(null)
   const [nodeFeeds, setNodeFeeds] = useState({}) // sessionId -> feed
   const [err, setErr] = useState('')
@@ -109,10 +110,18 @@ function RunsInner({ agents }) {
     if (!input.trim()) { setErr('请输入运行输入'); return }
     setStarting(true); setErr('')
     try {
-      const { runId: rid } = await product.startWorkflowRun(templateId, input.trim())
+      const { runId: rid } = await product.startWorkflowRun(templateId, input.trim(), targetPath.trim() || null)
       await loadRuns(templateId)
       setRunId(rid)
     } catch (e) { setErr(e.message) } finally { setStarting(false) }
+  }
+
+  /** 打开系统目录选择对话框定位目标目录（Electron 主进程能力） */
+  async function pickFolder() {
+    try {
+      const picked = await window.echo?.pickDirectory?.()
+      if (picked) setTargetPath(picked)
+    } catch (e) { setErr(`选择目录失败：${e.message}`) }
   }
 
   async function cancelRun() {
@@ -178,6 +187,31 @@ function RunsInner({ agents }) {
               rows={3}
               style={{ width: '100%', background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 6, padding: 8, font: 'inherit', fontSize: 12.5 }}
             />
+            <div className="field" style={{ marginTop: 8 }}>
+              <label>目标目录（可选，作为 {'{{workspace}}'} 变量与节点 cwd 兜底）</label>
+              <input
+                value={targetPath}
+                onChange={(e) => setTargetPath(e.target.value)}
+                placeholder="文件夹路径"
+                className="mono"
+                style={{ background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', font: 'inherit', fontSize: 12 }}
+              />
+            </div>
+            <div className="row" style={{ marginTop: 6, flexWrap: 'wrap', gap: 6 }}>
+              <select
+                value={workspaces.find((w) => w.path === targetPath)?.id ?? ''}
+                onChange={(e) => {
+                  const w = workspaces.find((x) => x.id === e.target.value)
+                  if (w) setTargetPath(w.path)
+                }}
+                style={{ flex: 1, minWidth: 110, background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 6, padding: '5px 6px', font: 'inherit', fontSize: 12 }}
+              >
+                <option value="">（选择工作区）</option>
+                {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+              </select>
+              <button className="btn small" onClick={pickFolder} title="打开系统目录选择对话框">浏览…</button>
+              {targetPath && <button className="btn small" onClick={() => setTargetPath('')}>清除</button>}
+            </div>
             <div style={{ marginTop: 8 }}>
               <button className="btn primary small" onClick={startRun} disabled={starting}>{starting ? '启动中…' : '运行'}</button>
             </div>
@@ -189,6 +223,7 @@ function RunsInner({ agents }) {
                 <div key={r.id} className={`list-item ${r.id === runId ? 'selected' : ''}`} onClick={() => { setRunId(r.id); setSelectedKey(null) }}>
                   <div className="name">{RUN_STATUS_LABEL[r.status] ?? r.status} {r.id.slice(0, 8)}</div>
                   <div className="meta">{new Date(r.createdAt).toLocaleString()}{r.error ? ` · ${r.error.slice(0, 24)}` : ''}</div>
+                  {r.input?.workspace && <div className="meta mono">📁 {r.input.workspace}</div>}
                 </div>
               ))}
             </div>
@@ -204,6 +239,7 @@ function RunsInner({ agents }) {
                 <strong>{detail.run.input?.template?.name ?? '运行'}</strong>
                 <span className={`wf-badge ${detail.run.status}`}>{RUN_STATUS_LABEL[detail.run.status] ?? detail.run.status}</span>
                 <span className="mono" style={{ color: 'var(--text-dim)', fontSize: 12 }}>{detail.run.id.slice(0, 8)}</span>
+                {detail.run.input?.workspace && <span className="mono" style={{ color: 'var(--text-dim)', fontSize: 12 }}>📁 {detail.run.input.workspace}</span>}
                 {RUN_ACTIVE.includes(detail.run.status) && <button className="btn danger small" onClick={cancelRun}>取消</button>}
                 {detail.run.status === 'failed' && <button className="btn small" onClick={resumeRun}>恢复</button>}
               </>
@@ -231,7 +267,7 @@ function RunsInner({ agents }) {
           </div>
         </div>
 
-        <div className="wf-inspector" style={{ position: 'static', width: 380, flexShrink: 0, border: 'none', borderLeft: '1px solid var(--border)', borderRadius: 0, overflow: 'auto' }}>
+        <div className="wf-inspector" style={{ position: 'static', width: 300, flexShrink: 0, border: 'none', borderLeft: '1px solid var(--border)', borderRadius: 0, overflow: 'auto' }}>
           {!selectedNodeRun && <div className="empty" style={{ marginTop: 40 }}>点击 DAG 节点查看详情与实时事件流</div>}
           {selectedNodeRun && (
             <>

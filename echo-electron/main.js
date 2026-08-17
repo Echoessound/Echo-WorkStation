@@ -11,7 +11,7 @@
  * 渲染进程通过「同源 fetch/WebSocket」直连 harness 的 /api（页面就由 harness 的 web 服务器 serve）。
  * preload 目前只暴露最小元信息；后续把 echo-api.mjs 搬进渲染层即可复用完整契约层。
  */
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const { spawn } = require('node:child_process')
 const net = require('node:net')
 const path = require('node:path')
@@ -19,6 +19,13 @@ const { startUiServer } = require('./proxy-server.js')
 const { openProductDb } = require('./product/db.js')
 const { createProductRouter } = require('./product/routes.js')
 const { createAgentService } = require('./product/services.js')
+
+// M2：目录选择对话框（运行中心「定位文件夹」用）。渲染层通过 preload 的
+// window.echo.pickDirectory() 调用。
+ipcMain.handle('echo:pick-directory', async () => {
+  const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
+  return result.canceled ? null : (result.filePaths[0] ?? null)
+})
 
 // 无 GPU 环境（虚拟机/远程桌面/显卡驱动缺失）下，Electron 的 GPU 进程会启动失败
 // （exit_code=-1073741515 / 0xC0000135）并导致整个应用退出。Echo 是纯文本 UI，

@@ -163,15 +163,23 @@ async function openProductDb({ dbPath = defaultDbPath() } = {}) {
     ? new SQL.Database(fs.readFileSync(dbPath))
     : new SQL.Database()
   db.run(SCHEMA)
+  let closed = false
+
+  /** 数据库已关闭后的任何访问都会让 sql.js 报 out of memory；统一抛可识别错误 */
+  function assertOpen() {
+    if (closed) throw new Error('database closed')
+  }
 
   /** 把内存库全量导出写盘（sql.js 是内存数据库，这是唯一的持久化手段） */
   function persist() {
+    assertOpen()
     const data = db.export()
     fs.writeFileSync(dbPath, Buffer.from(data))
   }
 
   /** 执行一条语句（不返回行）；写后自动持久化 */
   function run(sql, params = []) {
+    assertOpen()
     const stmt = db.prepare(sql)
     try {
       stmt.bind(params)
@@ -184,6 +192,7 @@ async function openProductDb({ dbPath = defaultDbPath() } = {}) {
 
   /** 查询多行 → 对象数组（sql.js 列名转驼峰由调用方处理，这里原样返回小写列名） */
   function all(sql, params = []) {
+    assertOpen()
     const stmt = db.prepare(sql)
     try {
       stmt.bind(params)
@@ -227,7 +236,10 @@ async function openProductDb({ dbPath = defaultDbPath() } = {}) {
   return {
     run, all, get, exec,
     persist,
-    close: () => { try { db.close() } catch { /* already closed */ } },
+    close: () => {
+      closed = true
+      try { db.close() } catch { /* already closed */ }
+    },
     dbPath,
   }
 }
