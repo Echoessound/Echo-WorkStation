@@ -81,10 +81,16 @@ export const product = {
   updateWorkflow: (id, body) => prod(`workflows/${id}`, { method: 'PUT', body }),
   deleteWorkflow: (id) => prod(`workflows/${id}`, { method: 'DELETE' }),
   seedReviewWorkflow: () => prod('workflows/seed/review', { method: 'POST' }),
+  seedPaperWorkflow: () => prod('workflows/seed/paper', { method: 'POST' }),
   startWorkflowRun: (id, input, workspace) => prod(`workflows/${id}/run`, { method: 'POST', body: { input, workspace: workspace ?? null } }),
   listWorkflowRuns: (id) => prod(`workflows/${id}/runs`),
   getWorkflowRun: (runId) => prod(`workflows/runs/${runId}`),
   cancelWorkflowRun: (runId) => prod(`workflows/runs/${runId}/cancel`, { method: 'POST' }),
   resumeWorkflowRun: (runId) => prod(`workflows/runs/${runId}/resume`, { method: 'POST' }),
   approveWorkflowNode: (runId, nodeKey) => prod(`workflows/runs/${runId}/nodes/${nodeKey}/approve`, { method: 'POST' }),
+
+  listArtifacts: (runId) => prod(`artifacts${runId ? `?runId=${encodeURIComponent(runId)}` : ''}`),
+  getArtifact: (id) => prod(`artifacts/${id}`),
+  createArtifact: (body) => prod('artifacts', { method: 'POST', body }),
+  deleteArtifact: (id) => prod(`artifacts/${id}`, { method: 'DELETE' }),
 }

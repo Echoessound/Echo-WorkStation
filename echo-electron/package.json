@@ -14,6 +14,8 @@
     "test:m1:no-llm": "node test-m1.js --no-llm",
     "test:m2": "node test-m2.js",
     "test:m2:no-llm": "node test-m2.js --no-llm",
+    "test:m3": "node test-m3.js",
+    "test:m3:no-llm": "node test-m3.js --no-llm",
     "test:fold": "node test-fold.mjs",
     "test:ui": "electron test-ui.cjs --disable-gpu --no-sandbox"
   },

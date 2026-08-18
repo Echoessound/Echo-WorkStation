@@ -12,6 +12,7 @@
 const { createWorkspaceService, createAgentService, createRunService, resolveDshHome, userPresetRoot } = require('./services.js')
 const { createWorkflowService } = require('./workflow-service.js')
 const { createWorkflowEngine } = require('./workflow-engine.js')
+const { createArtifactService } = require('./artifact-service.js')
 
 function sendJson(res, status, body) {
   const payload = JSON.stringify(body)
@@ -59,9 +60,10 @@ function createProductRouter({ db, harnessBase }) {
   const workspaces = createWorkspaceService(db)
   const agents = createAgentService(db)
   const runs = createRunService(db)
+  const artifacts = createArtifactService(db)
   const workflows = createWorkflowService(db, agents)
   const workflowEngine = harnessBase
-    ? createWorkflowEngine({ db, runService: runs, workflowService: workflows, agentService: agents, harnessBase })
+    ? createWorkflowEngine({ db, runService: runs, workflowService: workflows, agentService: agents, artifactService: artifacts, harnessBase })
     : null
 
   async function handle(req, res) {
@@ -151,6 +153,29 @@ function createProductRouter({ db, harnessBase }) {
         }
       }
 
+      // ── artifacts（M3：产物注册与查询）────────────────────────
+      //  /artifacts?runId=&sessionId= | /artifacts/:id
+      if (resource === 'artifacts') {
+        if (req.method === 'GET' && !id) {
+          const runIdQ = url.searchParams.get('runId') ?? undefined
+          const sessionIdQ = url.searchParams.get('sessionId') ?? undefined
+          return ok(res, { items: await artifacts.list(
+            runIdQ ? { runId: runIdQ } : sessionIdQ ? { sessionId: sessionIdQ } : {},
+          ) }), true
+        }
+        if (req.method === 'POST' && !id) {
+          const body = await readBody(req)
+          return ok(res, await artifacts.create(body)), true
+        }
+        if (id) {
+          if (req.method === 'GET') return ok(res, await artifacts.get(id)), true
+          if (req.method === 'DELETE') {
+            await artifacts.remove(id)
+            return ok(res, { removed: id }), true
+          }
+        }
+      }
+
       // ── workflows（M2：DAG 模板 + 运行）──────────────────────
       // 路径形态：/workflows | /workflows/:id | /workflows/seed/review
       //   | /workflows/:id/run | /workflows/:id/runs
@@ -167,9 +192,12 @@ function createProductRouter({ db, harnessBase }) {
             return ok(res, await workflows.create(body)), true
           }
         }
-        // 载入内置并行评审模板（幂等）
+        // 载入内置模板（幂等）：并行评审 / 论文工作流
         if (p1 === 'seed' && p2 === 'review' && req.method === 'POST') {
           return ok(res, await workflows.seedReview()), true
+        }
+        if (p1 === 'seed' && p2 === 'paper' && req.method === 'POST') {
+          return ok(res, await workflows.seedPaper()), true
         }
         // run 详情与操作
         if (p1 === 'runs' && p2) {

@@ -21,6 +21,7 @@
  *   running/awaiting_approval → interrupted（进程重启）→ (resume) pending
  */
 const { newId } = require('./db.js')
+const { parseArtifactOutput } = require('./artifact-service.js')
 
 const NODE_TIMEOUT_MS = 10 * 60 * 1000 // 单节点会话超时
 const POLL_INTERVAL_MS = 1500
@@ -168,10 +169,10 @@ function updateRunStatus(db, runId, status, { finishedAt, error, output } = {}) 
 
 /**
  * 创建 DAG 调度器。
- * @param {{ db, runService, workflowService, agentService, harnessBase }} deps
+ * @param {{ db, runService, workflowService, agentService, artifactService, harnessBase }} deps
  *   harnessBase 形如 http://127.0.0.1:<port>/api
  */
-function createWorkflowEngine({ db, runService, workflowService, agentService, harnessBase }) {
+function createWorkflowEngine({ db, runService, workflowService, agentService, artifactService, harnessBase }) {
   /** harness RPC 信封（与 echo-api.mjs 一致） */
   async function rpc(method, payload) {
     const res = await fetch(`${harnessBase}/${method}`, {
@@ -359,6 +360,23 @@ function createWorkflowEngine({ db, runService, workflowService, agentService, h
         const output = extractOutput(events)
         updateNodeRun(db, nodeRun.id, { status: NODE_SUCCESS, output, finishedAt: Date.now() })
         console.log(`[workflow] 节点 ${nodeRun.nodeKey} 完成（${output.length} 字符）`)
+        // M3：节点输出是结构化 JSON 产物时自动注册（ArtifactRegistry）
+        if (artifactService) {
+          try {
+            const artifact = parseArtifactOutput(output)
+            if (artifact) {
+              await artifactService.create({
+                runId,
+                sessionId,
+                nodeKey: nodeRun.nodeKey,
+                ...artifact,
+              })
+              console.log(`[workflow] 节点 ${nodeRun.nodeKey} 已注册产物「${artifact.name}」(${artifact.kind})`)
+            }
+          } catch (err) {
+            console.warn(`[workflow] 产物注册失败（节点 ${nodeRun.nodeKey}）:`, err.message)
+          }
+        }
         void schedule(runId)
         return
       }

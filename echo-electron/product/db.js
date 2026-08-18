@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   id           TEXT PRIMARY KEY,
   run_id       TEXT,
   session_id   TEXT,
+  node_key     TEXT,
   name         TEXT NOT NULL,
   kind         TEXT NOT NULL,
   path         TEXT,
@@ -163,6 +164,17 @@ async function openProductDb({ dbPath = defaultDbPath() } = {}) {
     ? new SQL.Database(fs.readFileSync(dbPath))
     : new SQL.Database()
   db.run(SCHEMA)
+  // 兼容迁移：旧库的 artifacts 表缺 node_key 列（M3 新增），补上
+  // （这里不能用下方自定义的 all wrapper，它定义在 openProductDb 后半段）
+  {
+    const stmt = db.prepare('PRAGMA table_info(artifacts)')
+    const cols = []
+    while (stmt.step()) cols.push(stmt.getAsObject())
+    stmt.free()
+    if (!cols.some((c) => c.name === 'node_key')) {
+      db.run('ALTER TABLE artifacts ADD COLUMN node_key TEXT')
+    }
+  }
   let closed = false
 
   /** 数据库已关闭后的任何访问都会让 sql.js 报 out of memory；统一抛可识别错误 */

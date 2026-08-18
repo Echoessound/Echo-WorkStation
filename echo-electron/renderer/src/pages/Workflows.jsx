@@ -114,6 +114,15 @@ function Designer({ agents, reload }) {
     } catch (e) { setErr(e.message) }
   }
 
+  async function seedPaper() {
+    try {
+      const wf = await product.seedPaperWorkflow()
+      reload()
+      await loadTemplates()
+      await openTemplate(wf)
+    } catch (e) { setErr(e.message) }
+  }
+
   function addNode() {
     let key = `node_${nodeSeq.current}`
     nodeSeq.current += 1
@@ -195,7 +204,8 @@ function Designer({ agents, reload }) {
       <div className="side">
         <div className="row" style={{ marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
           <button className="btn primary small" onClick={newTemplate}>＋ 新建模板</button>
-          <button className="btn small" onClick={seedReview} title="一键创建 3 个内置评审 agent + 并行评审模板">载入并行评审模板</button>
+          <button className="btn small" onClick={seedReview} title="一键创建 3 个内置评审 agent + 并行评审模板">并行评审</button>
+          <button className="btn small" onClick={seedPaper} title="论文五阶段流水线模板（每阶段自动产出产物）">论文工作流</button>
         </div>
         <div className="page-sub" style={{ margin: '0 0 10px' }}>模板列表</div>
         <div className="list">

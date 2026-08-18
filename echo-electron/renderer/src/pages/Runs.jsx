@@ -3,6 +3,7 @@ import { ReactFlow, ReactFlowProvider, Background, Handle, Position } from '@xyf
 import '@xyflow/react/dist/style.css'
 import { product } from '../api.js'
 import { subscribeMux, foldEvent } from '../mux.js'
+import ArtifactPreview from '../ArtifactPreview.jsx'
 
 const RUN_STATUS_LABEL = {
   pending: '待开始', running: '运行中', success: '成功', failed: '失败', cancelled: '已取消',
@@ -12,6 +13,30 @@ const NODE_STATUS_LABEL = {
   awaiting_approval: '等待审批', approved: '已批准', cancelled: '已取消', interrupted: '已中断',
 }
 const RUN_ACTIVE = ['pending', 'running']
+
+const KIND_LABEL = { markdown: 'Markdown', json: 'JSON', code: '代码', table: '表格' }
+
+/** 从节点输出解析结构化产物（与后端 parseArtifactOutput 一致的最小实现） */
+function parseArtifactOutput(text) {
+  if (typeof text !== 'string' || !text.trim()) return null
+  const trimmed = text.trim()
+  let candidate = trimmed.startsWith('{') || trimmed.startsWith('[') ? trimmed : null
+  if (!candidate) {
+    const m = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+    if (m) candidate = m[1].trim()
+  }
+  if (!candidate) return null
+  let parsed
+  try { parsed = JSON.parse(candidate) } catch { return null }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+  if (!['markdown', 'json', 'code', 'table'].includes(parsed.type)) return null
+  if (typeof parsed.content !== 'string' || !parsed.content.trim()) return null
+  return {
+    kind: parsed.type,
+    name: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim() : '未命名产物',
+    content: parsed.content,
+  }
+}
 
 const StatusNodeView = React.memo(function StatusNodeView({ id, data, selected }) {
   return (
@@ -37,6 +62,8 @@ function RunsInner({ agents, workspaces }) {
   const [targetPath, setTargetPath] = useState('') // 目标目录（{{workspace}} / 节点 cwd 兜底）
   const [selectedKey, setSelectedKey] = useState(null)
   const [nodeFeeds, setNodeFeeds] = useState({}) // sessionId -> feed
+  const [artifacts, setArtifacts] = useState([]) // 当前 run 的产物
+  const [previewArtifactId, setPreviewArtifactId] = useState(null)
   const [err, setErr] = useState('')
   const [starting, setStarting] = useState(false)
 
@@ -105,6 +132,21 @@ function RunsInner({ agents, workspaces }) {
     return () => sub.close()
   }, [sessionIdsKey])
 
+  // 拉取当前 run 的产物（run 变化时 + detail 轮询中刷新）
+  useEffect(() => {
+    if (!runId) return
+    let alive = true
+    async function load() {
+      try {
+        const { items } = await product.listArtifacts(runId)
+        if (alive) setArtifacts(items ?? [])
+      } catch (e) { if (alive) setErr(e.message) }
+    }
+    void load()
+    const timer = setInterval(load, 2000)
+    return () => { alive = false; clearInterval(timer) }
+  }, [runId])
+
   async function startRun() {
     if (!templateId) { setErr('先选择模板'); return }
     if (!input.trim()) { setErr('请输入运行输入'); return }
@@ -128,6 +170,22 @@ function RunsInner({ agents, workspaces }) {
     if (!runId) return
     try { await product.cancelWorkflowRun(runId) } catch (e) { setErr(e.message) }
   }
+  /** 保存选中节点（success）输出为产物：若为 JSON 产物格式则用之，否则存为 markdown */
+  async function saveNodeArtifact() {
+    if (!selectedNodeRun || selectedNodeRun.status !== 'success') return
+    const output = selectedNodeRun.output ?? ''
+    const parsed = parseArtifactOutput(output)
+    try {
+      const body = parsed
+        ? { runId, sessionId: selectedNodeRun.sessionId, nodeKey: selectedNodeRun.nodeKey, ...parsed }
+        : { runId, sessionId: selectedNodeRun.sessionId, nodeKey: selectedNodeRun.nodeKey, name: selectedNodeRun.nodeKey, kind: 'markdown', content: output }
+      await product.createArtifact(body)
+      const { items } = await product.listArtifacts(runId)
+      setArtifacts(items ?? [])
+      setErr('')
+    } catch (e) { setErr(e.message) }
+  }
+
   async function resumeRun() {
     if (!runId) return
     try { await product.resumeWorkflowRun(runId) } catch (e) { setErr(e.message) }
@@ -232,7 +290,7 @@ function RunsInner({ agents, workspaces }) {
       </div>
 
       <div className="main" style={{ display: 'flex', padding: 0 }}>
-        <div style={{ flex: 1, position: 'relative', borderRight: '1px solid var(--border)' }}>
+        <div style={{ flex: 1, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           <div className="wf-run-head">
             {detail ? (
               <>
@@ -246,7 +304,7 @@ function RunsInner({ agents, workspaces }) {
             ) : <span style={{ color: 'var(--text-dim)' }}>选择左侧运行记录查看 DAG 与节点详情</span>}
           </div>
           {err && <div className="banner err" style={{ margin: '8px 12px 0' }}>{err}</div>}
-          <div style={{ height: 'calc(100% - 62px)', minHeight: 300 }}>
+          <div style={{ flex: 1, position: 'relative', minHeight: 200 }}>
             {detail ? (
               <ReactFlow
                 nodes={rfNodes}
@@ -263,6 +321,35 @@ function RunsInner({ agents, workspaces }) {
               </ReactFlow>
             ) : (
               <div className="wf-empty-hint">选择运行记录后这里展示 DAG（节点颜色实时点亮）。</div>
+            )}
+          </div>
+
+          {/* 底部产物栏（M3）：节点以 JSON 输出自动注册，点击预览 */}
+          <div className="wf-artifact-bar">
+            <div className="row" style={{ marginBottom: 6 }}>
+              <span className="page-sub" style={{ margin: 0 }}>产物（{artifacts.length}）</span>
+              <span className="hint" style={{ fontSize: 11, color: 'var(--text-dim)', marginLeft: 8 }}>节点以 JSON 输出自动注册；也可在右栏节点「＋ 保存为产物」</span>
+            </div>
+            {artifacts.length === 0 ? (
+              <div className="empty" style={{ padding: '8px 0' }}>暂无产物</div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {artifacts.map((a) => (
+                  <div
+                    key={a.id}
+                    className={`arf-chip ${a.id === previewArtifactId ? 'selected' : ''}`}
+                    onClick={() => setPreviewArtifactId(a.id === previewArtifactId ? null : a.id)}
+                  >
+                    <span className="wf-badge">{KIND_LABEL[a.kind] ?? a.kind}</span>
+                    <span>{a.name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {previewArtifactId && artifacts.find((a) => a.id === previewArtifactId) && (
+              <div className="wf-artifact-preview">
+                <ArtifactPreview artifact={artifacts.find((a) => a.id === previewArtifactId)} />
+              </div>
             )}
           </div>
         </div>
@@ -296,6 +383,7 @@ function RunsInner({ agents, workspaces }) {
                 <div className="field">
                   <label>输出</label>
                   <div className="desc" style={{ whiteSpace: 'pre-wrap' }}>{selectedNodeRun.output ?? '(空)'}</div>
+                  <button className="btn small" style={{ marginTop: 6 }} onClick={saveNodeArtifact}>＋ 保存为产物</button>
                 </div>
               )}
               {selectedNodeRun.status === 'failed' && (

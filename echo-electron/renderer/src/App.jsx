@@ -5,6 +5,7 @@ import Agents from './pages/Agents.jsx'
 import Chat from './pages/Chat.jsx'
 import Workflows from './pages/Workflows.jsx'
 import Runs from './pages/Runs.jsx'
+import Artifacts from './pages/Artifacts.jsx'
 
 const TABS = [
   { id: 'workspaces', label: '工作区', component: Workspaces },
@@ -12,6 +13,7 @@ const TABS = [
   { id: 'chat', label: 'Chat', component: Chat },
   { id: 'workflows', label: 'Workflow 设计', component: Workflows },
   { id: 'runs', label: '运行中心', component: Runs },
+  { id: 'artifacts', label: '产物', component: Artifacts },
 ]
 
 export default function App() {
