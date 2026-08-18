@@ -192,12 +192,9 @@ function createProductRouter({ db, harnessBase }) {
             return ok(res, await workflows.create(body)), true
           }
         }
-        // 载入内置模板（幂等）：并行评审 / 论文工作流
+        // 载入内置并行评审模板（幂等）
         if (p1 === 'seed' && p2 === 'review' && req.method === 'POST') {
           return ok(res, await workflows.seedReview()), true
-        }
-        if (p1 === 'seed' && p2 === 'paper' && req.method === 'POST') {
-          return ok(res, await workflows.seedPaper()), true
         }
         // run 详情与操作
         if (p1 === 'runs' && p2) {

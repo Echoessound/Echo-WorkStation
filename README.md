@@ -2,7 +2,7 @@
 
 基于 **DeepSeek Harness 引擎**的通用 AI 工作站桌面应用（Electron 壳 + 独立 Node 引擎进程）。
 
-目标不是重写一个 agent 运行时，而是**复用 DeepSeek Harness 现成的 LLM 引擎、Agent 循环、结构化事件流、会话持久化与思维链能力**，在其上构建产品层：通用工作站（论文 / 代码 / 数据分析 / 文档 / 评审）、可视化 Workflow 编排、实时 CoT 报道与产物预览。
+目标不是重写一个 agent 运行时，而是**复用 DeepSeek Harness 现成的 LLM 引擎、Agent 循环、结构化事件流、会话持久化与思维链能力**，在其上构建产品层：通用工作站（代码 / 数据分析 / 文档 / 评审）、可视化 Workflow 编排、实时 CoT 报道与产物预览。
 
 > 详细设计与改造方案见 [`echo-workstation-改造方案.md`](./echo-workstation-改造方案.md)。
 
@@ -31,12 +31,11 @@
 - ✅ 运行中心三栏：DAG 图实时点亮、节点级 CoT/工具实时流、定位目标文件夹（系统目录对话框）
 - ✅ 集成验证 `test-m2.js`：33 项断言全过（并行评审模板真实跑通 + 完整审批流 + 取消 + 恢复）
 
-**M3 产物管线 + 预览 + 论文迁移（已完成）**
+**M3 产物管线 + 预览（已完成）**
 
 - ✅ ArtifactRegistry：workflow 节点以 JSON 输出（`{"type","title","content"}`）→ 引擎自动注册产物；手动「＋ 保存为产物」
 - ✅ 产物预览渲染器：markdown / json / code / table 四类自研轻量渲染（无重型依赖）
 - ✅ 产物库页面 + 运行中心底部产物栏（自动注册实时刷新 + 点击预览）
-- ✅ 一键载入「论文工作流模板」：大纲 → 初稿 → 自评 → 修订 → 终稿，5 阶段串行且每阶段自动产出产物
 - ✅ 集成验证 `test-m3.js`：23 项断言全过（含真实 LLM 自动产物注册）
 
 ## 架构
@@ -89,7 +88,7 @@ node test-m1.js      # M1 集成：产品域 CRUD + preset 生成 + 真实试跑
 node test-m1.js --no-llm   # 跳过真实 LLM 调用，快速验证链路
 node test-m2.js      # M2 集成：workflow 调度 + 审批 + 取消 + 恢复（33 断言）
 node test-m2.js --no-llm
-node test-m3.js      # M3 集成：产物管线 + 论文模板（23 断言）
+node test-m3.js      # M3 集成：产物管线 + 预览（23 断言）
 node test-m3.js --no-llm
 ```
 
@@ -106,7 +105,7 @@ node fetch-trajectory.mjs <sessionId> --thinking     # 导出含思维链的轨�
 | 路径 | 说明 |
 |---|---|
 | `echo-electron/` | Electron 应用（主进程 / 代理 / 渲染页 / 产品域 / 集成测试） |
-| `echo-electron/product/` | 产品域：`db.js`（sql.js 8 表 + 迁移）、`services.js`（Workspace/Agent/Run CRUD + preset 生成）、`workflow-service.js`（模板 + DAG 校验 + seed 评审/论文模板）、`workflow-engine.js`（DAG 调度/审批/恢复）、`artifact-service.js`（产物注册 + JSON 解析）、`routes.js`（/prod/* API）、`presets/`（工具集模板） |
+| `echo-electron/product/` | 产品域：`db.js`（sql.js 8 表 + 迁移）、`services.js`（Workspace/Agent/Run CRUD + preset 生成）、`workflow-service.js`（模板 + DAG 校验 + seed 并行评审模板）、`workflow-engine.js`（DAG 调度/审批/恢复）、`artifact-service.js`（产物注册 + JSON 解析）、`routes.js`（/prod/* API）、`presets/`（工具集模板） |
 | `echo-electron/renderer/` | React + Vite 渲染层（`src/pages/`：Workspaces / Agents / Chat / Workflows / Runs / Artifacts；`src/ArtifactPreview.jsx` 预览渲染器；`src/api.js`、`src/mux.js`） |
 | `echo-api.mjs` | harness 官方端点契约层 |
 | `echo-agent-demo.mjs` | M0 试跑闭环（WS 实时流 + 产物注册） |
@@ -120,7 +119,7 @@ node fetch-trajectory.mjs <sessionId> --thinking     # 导出含思维链的轨�
 | M0 引擎对接（Electron 壳 + 代理 + 试跑闭环） | ✅ |
 | M1 产品域（workspace/agent CRUD + SQLite + Chat 面板） | ✅ |
 | M2 Workflow 设计器 + DAG 调度 + 运行中心 | ✅ |
-| M3 产物管线 + 预览 + 论文工作流迁移 | ✅ |
+| M3 产物管线 + 预览 | ✅ |
 | M4 打包发布 | 计划中 |
 
 ## 踩坑记录（对后续开发有价值）

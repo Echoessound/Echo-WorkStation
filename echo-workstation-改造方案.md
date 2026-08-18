@@ -129,7 +129,7 @@
 | **M0 引擎对接** | Electron 壳 + harness 子进程 + 随机端口 + `/api` + mux 流打通；把 `fetch-trajectory.mjs` 的能力搬进窗口 | Electron 窗口里实时看到 CoT 流、工具调用、消息正文（即本会话已验证的数据流） | 1-2 周 | ✅ 已完成（echo-electron/：窗口跑通 harness GUI；M0.5 已加 UI 代理层 serve 自研页面，test-proxy.js 三关验证） |
 | **M1 产品域 + Chat** | SQLite 8 表、Workspace/Agent CRUD、agent 试跑（= `session.prompt` + 事件订阅）、Chat 面板 | 在 UI 里新建 agent（系统提示词/模型/工具）→ 试跑 → 实时 CoT + 工具调用 + 结果 | 2 周 | ✅ 已完成（echo-electron/product/ + renderer/：sql.js 8 表、/prod/* CRUD、agent preset 生成注入 persona、React Chat 面板；test-m1.js 19 断言全过） |
 | **M2 Workflow + 运行中心** | DAG 设计器（ReactFlow 已有基础）、DAG 调度器（并行/审批/恢复=agentLoop.resume）、三栏运行中心 | 多 agent 并行评审模板跑通，节点状态实时点亮 | 2-3 周 |
-| **M3 产物管线 + 论文迁移** | 输出契约、ArtifactRegistry、预览面板（md/PDF/代码/JSON/表格）；论文 7 阶段迁移为内置 agent + workflow 模板 | 自定义 agent+workflow 产出结构化 JSON 自动渲染；论文流程用纯 harness 复现旧功能 | 2 周 |
+| **M3 产物管线 + 预览** | 输出契约、ArtifactRegistry、预览面板（md/代码/JSON/表格） | 自定义 agent+workflow 产出结构化 JSON 自动注册并在运行中心/产物库预览渲染 | 2 周 | ✅ 已完成（echo-electron/product/artifact-service.js + renderer/src/ArtifactPreview.jsx + 产物库页；test-m3.js 23 断言全过，含真实 LLM 自动产物注册） |
 | **M4 打包发布** | `pnpm dist` 出包、崩溃恢复、用量页、文档 | 断网/限流/杀进程可恢复；安装包可分发 | 1-2 周 |
 
 ---

@@ -1,9 +1,9 @@
 /**
- * test-m3.js — Echo Workstation M3 集成验证（产物管线 + 论文模板）
+ * test-m3.js — Echo Workstation M3 集成验证（产物管线 + 预览）
  *
  * 链路：隔离 harness（临时 DSH_HOME）→ 产品域 SQLite → UI 服务器
  * 验证：
- *  [--no-llm] parseArtifactOutput 单测、artifacts CRUD、seed 论文工作流结构
+ *  [--no-llm] parseArtifactOutput 单测、artifacts CRUD
  *  [真实 LLM] 节点以 JSON 输出 → 引擎自动注册产物 → 内容正确；手动保存产物
  *
  * 用法：node test-m3.js [--no-llm]
@@ -135,37 +135,15 @@ async function main() {
     const listAfter = await prod(base, 'artifacts?runId=run-test')
     check('删除产物', listAfter.value.items.length === 0)
 
-    // ── 3. seed 论文工作流模板 ────────────────────────────────
-    console.log('\n[3] seed 论文工作流模板')
-    const seed = await prod(base, 'workflows/seed/paper', { method: 'POST' })
-    check('seed 创建论文模板', seed.ok, seed.value?.id)
-    check('模板结构：5 节点 + 4 边（串行）', seed.value.nodes.length === 5 && seed.value.edges.length === 4)
-    const seed2 = await prod(base, 'workflows/seed/paper', { method: 'POST' })
-    check('seed 幂等（同 id）', seed2.value.id === seed.value.id)
-    const agents = await prod(base, 'agents')
-    const builtin = agents.value.items.filter(a => (a.params?.seedKey ?? '').startsWith('paper-'))
-    check('seed 创建 5 个内置论文 agent', builtin.length === 5, builtin.map(a => a.name).join(','))
-    // 论文节点 prompt 含 JSON 输出契约
-    const outlineNode = seed.value.nodes.find(n => n.key === 'paper_outline')
-    check('论文节点 prompt 带 JSON 输出契约', /type.*markdown.*title/.test(outlineNode.params?.prompt ?? ''), (outlineNode.params?.prompt ?? '').slice(0, 40))
-    const edgeChain = seed.value.edges.map(e => `${e.source}>${e.target}`).join(',')
-    const chainOk = ['paper_outline>paper_draft', 'paper_draft>paper_self_review', 'paper_self_review>paper_revise', 'paper_revise>paper_final'].every(s => edgeChain.includes(s))
-    check('串行依赖链正确', chainOk, edgeChain)
-
-    // 清理内置论文 agent（真实 LLM 分支不用它们）
-    // （--no-llm 也清理，统一在 finally 或此处）
-
     if (NO_LLM) {
-      for (const a of builtin) await prod(base, `agents/${a.id}`, { method: 'DELETE' })
-      await prod(base, `workflows/${seed.value.id}`, { method: 'DELETE' })
       console.log(`\n结果：${passed} 通过 / ${failed} 失败`)
       if (failed > 0) process.exit(1)
       console.log('M3 集成验证（--no-llm）全部通过 ✅')
       return
     }
 
-    // ── 4. 引擎自动产物注册（真实 LLM）─────────────────────────
-    console.log('\n[4] 引擎节点 JSON 产物自动注册')
+    // ── 3. 引擎自动产物注册（真实 LLM）─────────────────────────
+    console.log('\n[3] 引擎节点 JSON 产物自动注册')
     // 用一个自定义 agent + 2 节点 workflow（节点要求 JSON 输出）
     const agentMsg = await prod(base, 'agents', {
       method: 'POST',
@@ -198,7 +176,7 @@ async function main() {
     }
 
     // ── 5. 手动保存为产物（节点输出原样存）─────────────────────
-    console.log('\n[5] 手动保存产物')
+    console.log('\n[4] 手动保存产物')
     const manual = await prod(base, 'artifacts', {
       method: 'POST',
       body: { runId, sessionId: detail.nodes[0].sessionId, nodeKey: 'writer', name: '手动保存', kind: 'markdown', content: '手动内容' },
@@ -207,10 +185,8 @@ async function main() {
     const artList2 = await prod(base, `artifacts?runId=${runId}`)
     check('run 产物共 2 个（自动 + 手动）', artList2.value.items.length >= 2, `${artList2.value.items.length} 个`)
 
-    // ── 6. 清理 ───────────────────────────────────────────────
-    console.log('\n[6] 清理')
-    for (const a of builtin) await prod(base, `agents/${a.id}`, { method: 'DELETE' })
-    await prod(base, `workflows/${seed.value.id}`, { method: 'DELETE' })
+    // ── 5. 清理 ───────────────────────────────────────────────
+    console.log('\n[5] 清理')
     await prod(base, `workflows/${wfId}`, { method: 'DELETE' })
     await prod(base, `agents/${agentId}`, { method: 'DELETE' })
     const leftover = await prod(base, 'workflows')

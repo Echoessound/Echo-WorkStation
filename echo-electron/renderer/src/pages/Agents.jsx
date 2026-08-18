@@ -115,7 +115,7 @@ export default function Agents({ agents, workspaces, toolsets, reload }) {
         <form onSubmit={save} className="card">
           <div className="field">
             <label>名称 *</label>
-            <input value={form.name} onChange={(e) => patch('name', e.target.value)} placeholder="例如：论文评审员" />
+            <input value={form.name} onChange={(e) => patch('name', e.target.value)} placeholder="例如：代码评审员" />
           </div>
           <div className="field">
             <label>描述</label>

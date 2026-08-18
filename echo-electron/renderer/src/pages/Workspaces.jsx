@@ -37,11 +37,11 @@ export default function Workspaces({ workspaces, agents, reload }) {
         <form onSubmit={create}>
           <div className="field">
             <label>名称</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：论文项目" />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：代码项目" />
           </div>
           <div className="field">
             <label>路径（绝对路径）</label>
-            <input value={wsPath} onChange={(e) => setWsPath(e.target.value)} placeholder="例如：F:\projects\paper" className="mono" />
+            <input value={wsPath} onChange={(e) => setWsPath(e.target.value)} placeholder="例如：F:\projects\app" className="mono" />
           </div>
           <button className="btn primary" disabled={busy}>创建</button>
         </form>
